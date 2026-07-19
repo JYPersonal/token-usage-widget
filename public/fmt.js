@@ -1,0 +1,44 @@
+/**
+ * Shared reset-time formatting for dashboard + widget.
+ * UMD: browser → globalThis.TokenUsageFmt; Node → module.exports.
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === "object" && module.exports) {
+    module.exports = api;
+  }
+  root.TokenUsageFmt = api;
+})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  /**
+   * @param {string | null | undefined} iso
+   * @param {number} [nowMs]
+   * @returns {string}
+   */
+  function formatReset(iso, nowMs = Date.now()) {
+    if (!iso) return "";
+    const then = new Date(iso);
+    const t = then.getTime();
+    if (Number.isNaN(t)) return "";
+    const diff = t - nowMs;
+    if (diff <= 0) return "Resets now";
+
+    const totalMin = Math.max(0, Math.round(diff / 60000));
+    const days = Math.floor(totalMin / (60 * 24));
+    const hours = Math.floor((totalMin % (60 * 24)) / 60);
+    const mins = totalMin % 60;
+    const parts = [];
+    if (days > 0) parts.push(`${days} day${days === 1 ? "" : "s"}`);
+    if (hours > 0 || days > 0) parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
+    if (days === 0) parts.push(`${mins} minute${mins === 1 ? "" : "s"}`);
+
+    const when = then.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `Resets in ${parts.join(" ")} · ${when}`;
+  }
+
+  return { formatReset };
+});

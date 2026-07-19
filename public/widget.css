@@ -1,0 +1,101 @@
+:root {
+  --bg: #0a161c;
+  --ink: #d8eef0;
+  --dim: #7a9aa3;
+  --faint: #54707a;
+  --line: rgba(120, 200, 210, 0.14);
+  --danger: #ff6b8b;
+  --warn: #ffb86b;
+  --mono: "Cascadia Mono", "Consolas", "IBM Plex Mono", ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.35;
+  user-select: none;
+}
+
+.chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 3px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chrome-title {
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.chrome-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.chrome-actions button {
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.chrome-actions button:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.body {
+  padding: 6px 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+
+.line--err { color: var(--danger); }
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 8px 5px;
+  border-top: 1px solid var(--line);
+}
+
+.status {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.status.error { color: var(--danger); }
+
+.badge {
+  color: var(--warn);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Token Usage</title>
+  <link rel="stylesheet" href="/widget.css" />
+  <script src="/widget-compact.js"></script>
+</head>
+<body>
+  <header class="chrome" style="-webkit-app-region: drag">
+    <span class="chrome-title">usage</span>
+    <div class="chrome-actions" style="-webkit-app-region: no-drag">
+      <button type="button" id="btn-dash" title="Full dashboard">↗</button>
+      <button type="button" id="btn-hide" title="Hide">–</button>
+      <button type="button" id="btn-quit" title="Quit">×</button>
+    </div>
+  </header>
+
+  <main id="body" class="body"></main>
+
+  <footer class="foot">
+    <span id="status" class="status">…</span>
+    <span id="fixture" class="badge" hidden>FAKE</span>
+  </footer>
+
+  <script src="/widget.js"></script>
+</body>
+</html>

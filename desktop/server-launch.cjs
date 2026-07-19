@@ -1,0 +1,208 @@
+"use strict";
+
+/**
+ * Shared usage-server launch helpers for the Electron widget.
+ * Kept free of Electron imports so Node tests can require this file.
+ */
+
+const { spawn, execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
+
+const ROOT = path.join(__dirname, "..");
+const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_PORT = 4321;
+const SERVER_LOG = path.join(os.tmpdir(), "token-usage-dashboard-server.log");
+
+function healthCheck(host = DEFAULT_HOST, port = DEFAULT_PORT, timeoutMs = 2000) {
+  return fetchHealth(host, port, timeoutMs).then((h) => Boolean(h?.ok));
+}
+
+/**
+ * @returns {Promise<{ ok: boolean, fixture: boolean } | null>}
+ */
+function fetchHealth(host = DEFAULT_HOST, port = DEFAULT_PORT, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const req = http.get({ host, port, path: "/api/health", timeout: timeoutMs }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        if (res.statusCode !== 200) {
+          resolve(null);
+          return;
+        }
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          resolve({ ok: body.status === "ok", fixture: Boolean(body.fixture) });
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+/** Best-effort: stop whatever is listening so we can restart in the right mode. */
+function freePort(port) {
+  if (process.platform !== "win32") return;
+  try {
+    const out = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        `Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`,
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    for (const tok of out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+      const pid = Number(tok);
+      if (!Number.isFinite(pid) || pid <= 0) continue;
+      try {
+        execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** Electron's process.execPath is electron.exe — never use it to run the API server. */
+function resolveNodeBinary(env = process.env) {
+  const candidates = [
+    env.npm_node_execpath,
+    env.NODE_BINARY,
+    env.NVM_SYMLINK && path.join(env.NVM_SYMLINK, "node.exe"),
+    env.NVM_HOME && path.join(env.NVM_HOME, "nodejs", "node.exe"),
+    "C:\\nvm4w\\nodejs\\node.exe",
+  ].filter(Boolean);
+
+  for (const c of candidates) {
+    try {
+      if (c && fs.existsSync(c)) return c;
+    } catch {
+      // continue
+    }
+  }
+
+  try {
+    const out = execFileSync("where.exe", ["node"], { encoding: "utf8", windowsHide: true });
+    const first = out
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.toLowerCase().endsWith("node.exe"));
+    if (first && fs.existsSync(first)) return first;
+  } catch {
+    // fall through
+  }
+
+  return "node";
+}
+
+function assertNotElectronBinary(nodeBin) {
+  const base = path.basename(String(nodeBin)).toLowerCase();
+  if (base === "electron.exe" || base === "electron") {
+    throw new Error(`Refusing to launch usage server with Electron binary: ${nodeBin}`);
+  }
+}
+
+/**
+ * @returns {Promise<{ proc: import('node:child_process').ChildProcess, nodeBin: string, logPath: string }>}
+ */
+async function ensureUsageServer(options = {}) {
+  const host = options.host || DEFAULT_HOST;
+  const port = Number(options.port || process.env.PORT || DEFAULT_PORT);
+  const root = options.root || ROOT;
+  const envExtra = options.env || {};
+  const logPath = options.logPath || SERVER_LOG;
+  const maxAttempts = options.maxAttempts || 80;
+  const mergedEnv = { ...process.env, ...envExtra };
+  const wantFixture =
+    mergedEnv.USAGE_FIXTURE === "1" || String(mergedEnv.USAGE_FIXTURE).toLowerCase() === "true";
+
+  const existing = await fetchHealth(host, port);
+  if (existing?.ok && existing.fixture === wantFixture) {
+    return { proc: null, nodeBin: null, logPath, reused: true };
+  }
+  if (existing?.ok && existing.fixture !== wantFixture) {
+    fs.appendFileSync(
+      logPath,
+      `[${new Date().toISOString()}] port ${port} fixture=${existing.fixture} but want ${wantFixture}; freeing\n`,
+    );
+    freePort(port);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  const nodeBin = resolveNodeBinary(mergedEnv);
+  assertNotElectronBinary(nodeBin);
+
+  const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
+  const entry = path.join(root, "src", "server.ts");
+  if (!fs.existsSync(tsxCli)) {
+    throw new Error(`tsx CLI missing at ${tsxCli}. Run npm install in ${root}.`);
+  }
+
+  fs.writeFileSync(logPath, `[${new Date().toISOString()}] starting server with ${nodeBin}\n`, "utf8");
+  const logFd = fs.openSync(logPath, "a");
+  const env = { ...mergedEnv, PORT: String(port) };
+  delete env.ELECTRON_RUN_AS_NODE;
+  // Default launch is live; only keep fixture when explicitly requested.
+  if (!wantFixture) delete env.USAGE_FIXTURE;
+
+  const proc = spawn(nodeBin, [tsxCli, entry], {
+    cwd: root,
+    env,
+    stdio: ["ignore", logFd, logFd],
+    windowsHide: true,
+  });
+  fs.closeSync(logFd);
+
+  let exitCode = null;
+  proc.on("exit", (code) => {
+    exitCode = code;
+  });
+  proc.on("error", (err) => {
+    fs.appendFileSync(logPath, `spawn error: ${err.message}\n`);
+  });
+
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    const h = await fetchHealth(host, port);
+    if (h?.ok && h.fixture === wantFixture) {
+      return { proc, nodeBin, logPath, reused: false };
+    }
+    if (exitCode !== null) break;
+  }
+
+  const tail = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").slice(-800) : "(no log)";
+  try {
+    proc.kill();
+  } catch {
+    // ignore
+  }
+  throw new Error(
+    `Usage server did not become ready on http://${host}:${port} (node=${nodeBin}, exit=${exitCode}).\nLog: ${logPath}\n${tail}`,
+  );
+}
+
+module.exports = {
+  ROOT,
+  DEFAULT_HOST,
+  DEFAULT_PORT,
+  SERVER_LOG,
+  healthCheck,
+  fetchHealth,
+  freePort,
+  resolveNodeBinary,
+  assertNotElectronBinary,
+  ensureUsageServer,
+};
