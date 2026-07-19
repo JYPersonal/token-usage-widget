@@ -1,5 +1,6 @@
 import type { ProviderUsage, UsageResponse, WindowId, WindowUsage } from "./types.js";
 import { unavailableAll } from "./types.js";
+import type { ProviderFlags } from "./config.js";
 
 function isoFromUnix(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString();
@@ -179,19 +180,25 @@ function grokFixture(): ProviderUsage {
   };
 }
 
-export function buildFixtureResponse(): UsageResponse {
+export function buildFixtureResponse(
+  enabled?: ProviderFlags,
+): UsageResponse {
+  const all: ProviderUsage[] = [
+    openaiFixture(),
+    opencodeFixture(),
+    cursorFixture(),
+    claudeFixture(),
+    openrouterFixture(),
+    kimiFixture(),
+    zaiFixture(),
+    grokFixture(),
+  ];
+  const providers = enabled
+    ? all.filter((p) => enabled[p.provider] === true)
+    : all;
   return {
     fetchedAt: new Date().toISOString(),
     fixture: true,
-    providers: [
-      openaiFixture(),
-      opencodeFixture(),
-      cursorFixture(),
-      claudeFixture(),
-      openrouterFixture(),
-      kimiFixture(),
-      zaiFixture(),
-      grokFixture(),
-    ],
+    providers,
   };
 }

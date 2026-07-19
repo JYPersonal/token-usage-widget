@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig, isFixtureMode } from "./config.js";
+import { loadConfig, isFixtureMode, type ProviderFlags } from "./config.js";
 import { buildFixtureResponse } from "./fixtures.js";
 import { fetchEnabledProviders } from "./providers/registry.js";
 import type { UsageResponse } from "./types.js";
+import { ALL_PROVIDER_IDS } from "./types.js";
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 
@@ -29,10 +30,16 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 }
 
 async function gatherUsage(): Promise<UsageResponse> {
-  if (isFixtureMode()) {
-    return buildFixtureResponse();
-  }
   const cfg = await loadConfig();
+  if (isFixtureMode()) {
+    // Demo all providers only when explicitly requested (CI / screenshots).
+    const allOn =
+      process.env.USAGE_FIXTURE_ALL === "1" || process.env.USAGE_FIXTURE_ALL === "true";
+    const flags: ProviderFlags = allOn
+      ? (Object.fromEntries(ALL_PROVIDER_IDS.map((id) => [id, true])) as ProviderFlags)
+      : cfg.providers;
+    return buildFixtureResponse(flags);
+  }
   const providers = await fetchEnabledProviders(cfg);
   return {
     fetchedAt: new Date().toISOString(),

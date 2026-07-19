@@ -100,7 +100,7 @@ async function main() {
 
   section(lines, "2. Unit tests (`npm test`)");
   {
-    const r = run(node, testArgs, { env: { USAGE_FIXTURE: "1" } });
+    const r = run(node, testArgs, { env: { USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1" } });
     lines.push(`- command: \`node --import tsx --test tests/*.test.{ts,cjs}\``);
     lines.push(`- exit: **${r.code}** (${r.ms}ms)`);
     const passLine = (r.stdout + "\n" + r.stderr).split(/\r?\n/).find((l) => /tests \d+/.test(l) || /pass \d+/.test(l));
@@ -131,7 +131,7 @@ async function main() {
     serverHandle = await ensureUsageServer({
       host: "127.0.0.1",
       port: PORT,
-      env: { ...process.env, USAGE_FIXTURE: "1", PORT: String(PORT), NODE_BINARY: resolveNodeBinary(process.env) },
+      env: { ...process.env, USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1", PORT: String(PORT), NODE_BINARY: resolveNodeBinary(process.env) },
     });
     lines.push(`- ensureUsageServer nodeBin: \`${serverHandle.nodeBin}\``);
     lines.push(`- reused existing: **${serverHandle.reused}**`);
@@ -150,7 +150,7 @@ async function main() {
     // Electron main strips USAGE_FIXTURE unless argv includes --fixture (product path stays live).
     widgetProc = spawn(electron, [ROOT, "--fixture"], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT), USAGE_FIXTURE: "1", NODE_BINARY: resolveNodeBinary(process.env) },
+      env: { ...process.env, PORT: String(PORT), USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1", NODE_BINARY: resolveNodeBinary(process.env) },
       stdio: "ignore",
       windowsHide: false,
       detached: true,

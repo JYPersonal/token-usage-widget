@@ -11,6 +11,7 @@ import os from "node:os";
 import readline from "node:readline";
 import {
   DEFAULT_ENABLED,
+  SETUP_DEFAULTS_ENABLED,
   configPath,
   type Config,
   type ProviderFlags,
@@ -177,10 +178,9 @@ function writeConfig(merged: Record<string, unknown>): void {
 
 async function runDefaults(enableAll: boolean): Promise<void> {
   const existing = loadExisting();
-  const providers: ProviderFlags = { ...DEFAULT_ENABLED };
-  if (enableAll) {
-    for (const id of ALL_PROVIDER_IDS) providers[id] = true;
-  }
+  const providers: ProviderFlags = enableAll
+    ? Object.fromEntries(ALL_PROVIDER_IDS.map((id) => [id, true])) as ProviderFlags
+    : { ...SETUP_DEFAULTS_ENABLED };
   const merged: Record<string, unknown> = {
     ...existing,
     providers,
@@ -198,7 +198,7 @@ async function runDefaults(enableAll: boolean): Promise<void> {
   console.log(
     enableAll
       ? "Defaults mode: all providers enabled (no secrets prompted)."
-      : "Defaults mode: built-in trio enabled (claude/openrouter/kimi/zai/grok off).",
+      : "Defaults mode: openai + cursor enabled (others off until you opt in).",
   );
 }
 

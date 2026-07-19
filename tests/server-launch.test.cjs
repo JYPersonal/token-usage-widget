@@ -41,7 +41,7 @@ test("ensureUsageServer starts fixture server with real node (not electron)", as
   const result = await ensureUsageServer({
     host: "127.0.0.1",
     port,
-    env: { ...process.env, USAGE_FIXTURE: "1", PORT: String(port) },
+    env: { ...process.env, USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1", PORT: String(port) },
     maxAttempts: 60,
   });
 

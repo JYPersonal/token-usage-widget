@@ -25,7 +25,7 @@ test("e2e fixture: dashboard + widget assets + usage shape", async () => {
   const entry = path.join(ROOT, "src", "server.ts");
   const proc = spawn(nodeBin, [tsxCli, entry], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), USAGE_FIXTURE: "1" },
+    env: { ...process.env, PORT: String(PORT), USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1" },
     stdio: "ignore",
     windowsHide: true,
   });

@@ -37,10 +37,22 @@ export interface Config {
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".local", "share", "opencode", "opencode.db");
 
-/** Built-in trio on; new harnesses opt-in via setup. */
+/** Cold start: show nothing until `npm run setup` (or explicit config.providers). */
 export const DEFAULT_ENABLED: ProviderFlags = {
+  openai: false,
+  opencode: false,
+  cursor: false,
+  claude: false,
+  openrouter: false,
+  kimi: false,
+  zai: false,
+  grok: false,
+};
+
+/** Sensible first-run picks for `npm run setup:defaults` (local auto-login providers). */
+export const SETUP_DEFAULTS_ENABLED: ProviderFlags = {
   openai: true,
-  opencode: true,
+  opencode: false,
   cursor: true,
   claude: false,
   openrouter: false,

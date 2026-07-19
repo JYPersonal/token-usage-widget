@@ -140,6 +140,24 @@ test("fixture response shape: eight providers, three windows each, fixture flag 
   }
 });
 
+test("fixture response respects enabled provider flags", () => {
+  const resp = buildFixtureResponse({
+    openai: true,
+    opencode: false,
+    cursor: true,
+    claude: false,
+    openrouter: false,
+    kimi: false,
+    zai: false,
+    grok: false,
+  });
+  assert.equal(resp.providers.length, 2);
+  assert.deepEqual(
+    resp.providers.map((p) => p.provider),
+    ["openai", "cursor"],
+  );
+});
+
 test("fixture OpenAI weekly window is ok with remainingPercent = 100 - used", () => {
   const resp = buildFixtureResponse();
   const openai = resp.providers.find((p) => p.provider === "openai");
