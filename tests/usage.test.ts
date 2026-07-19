@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { buildFixtureResponse } from "../src/fixtures.js";
 import { __test as openaiTest } from "../src/adapters/openai.js";
 import { __test as opencodeTest } from "../src/adapters/opencode.js";
+import { __test as cursorTest } from "../src/adapters/cursor.js";
 import type { WindowId, WindowUsage } from "../src/types.js";
 
 const { classifyDuration, mapWindows, windowFromRateLimit, pickRateLimits } = openaiTest;
 const { extractTokens, toMs, tokenWindow } = opencodeTest;
+const { mapCursorPeriod, parseCursorTimestamp, buildCursorBilling, formatPlanLabel } = cursorTest;
 
 const WINDOW_IDS: WindowId[] = ["five_hour", "week", "month"];
 
@@ -113,12 +115,21 @@ test("pickRateLimits falls back to top-level rateLimits when no codex key", () =
   assert.equal(picked?.primary?.usedPercent, 7);
 });
 
-test("fixture response shape: both providers, three windows each, fixture flag true", () => {
+test("fixture response shape: eight providers, three windows each, fixture flag true", () => {
   const resp = buildFixtureResponse();
   assert.equal(resp.fixture, true);
-  assert.equal(resp.providers.length, 2);
+  assert.equal(resp.providers.length, 8);
   const ids = resp.providers.map((p) => p.provider).sort();
-  assert.deepEqual(ids, ["openai", "opencode"]);
+  assert.deepEqual(ids, [
+    "claude",
+    "cursor",
+    "grok",
+    "kimi",
+    "openai",
+    "opencode",
+    "openrouter",
+    "zai",
+  ]);
   for (const p of resp.providers) {
     assert.ok(p.fetchedAt);
     assert.equal(Object.keys(p.windows).length, 3);
@@ -144,13 +155,29 @@ test("fixture OpenCode windows report usedTokens and remainingPercent when cappe
   const resp = buildFixtureResponse();
   const oc = resp.providers.find((p) => p.provider === "opencode");
   if (!oc) throw new Error("opencode provider missing from fixture");
-  for (const winId of WINDOW_IDS) {
-    const w: WindowUsage = oc.windows[winId];
-    assert.equal(w.status, "ok");
-    assert.ok(w.usedTokens !== null && w.usedTokens !== undefined);
-    assert.ok(w.remainingPercent !== null && w.remainingPercent !== undefined);
-    assert.equal(w.remainingPercent, Math.max(0, 100 - w.usedPercent!));
-  }
+  assert.equal(oc.label, "OpenCode Go");
+  assert.equal(oc.windows.five_hour.usedPercent, 0);
+  assert.equal(oc.windows.week.usedPercent, 100);
+  assert.equal(oc.windows.month.usedPercent, 50);
+  assert.equal(oc.windows.week.remainingPercent, 0);
+  assert.equal(oc.windows.month.remainingPercent, 50);
+  assert.ok(oc.windows.five_hour.resetsAtIso);
+});
+
+test("parseGoDashboardHtml extracts rolling/weekly/monthly", () => {
+  const { parseGoDashboardHtml, mapGoToWindows } = opencodeTest;
+  const html =
+    "<script>rollingUsage:$R[10]={resetInSec:18000,usagePercent:0}weeklyUsage:$R[11]={resetInSec:57180,usagePercent:100}monthlyUsage:$R[12]={resetInSec:2336400,usagePercent:50}</script>";
+  const snap = parseGoDashboardHtml(html);
+  assert.ok(snap);
+  assert.equal(snap!.rolling?.usagePercent, 0);
+  assert.equal(snap!.weekly?.usagePercent, 100);
+  assert.equal(snap!.monthly?.usagePercent, 50);
+  const windows = mapGoToWindows(snap!);
+  assert.equal(windows.five_hour.usedPercent, 0);
+  assert.equal(windows.week.usedPercent, 100);
+  assert.equal(windows.month.usedPercent, 50);
+  assert.equal(windows.week.remainingPercent, 0);
 });
 
 test("extractTokens prefers explicit total, else sums nested parts", () => {
@@ -184,4 +211,77 @@ test("OpenCode tokenWindow: clamps to 100 and computes remaining when capped", (
   assert.equal(w.usedPercent, 100);
   assert.equal(w.remainingPercent, 0);
   assert.equal(w.usedTokens, 2_000_000);
+});
+
+test("mapCursorPeriod maps totalPercentUsed to month; 5h/week unavailable", () => {
+  const windows = mapCursorPeriod({
+    billingCycleEnd: "1785835631000",
+    planUsage: { totalPercentUsed: 23.276923076923076 },
+  });
+  assert.equal(windows.five_hour.status, "unavailable");
+  assert.equal(windows.week.status, "unavailable");
+  assert.equal(windows.month.status, "ok");
+  assert.equal(windows.month.usedPercent, 23.3);
+  assert.equal(windows.month.remainingPercent, 76.7);
+  assert.equal(windows.month.resetsAtIso, new Date(1785835631000).toISOString());
+});
+
+test("mapCursorPeriod marks month unavailable when planUsage missing", () => {
+  const windows = mapCursorPeriod({});
+  assert.equal(windows.month.status, "unavailable");
+  assert.ok(windows.month.reason);
+});
+
+test("parseCursorTimestamp accepts ms strings and second numbers", () => {
+  assert.equal(parseCursorTimestamp("1785835631000"), new Date(1785835631000).toISOString());
+  assert.equal(parseCursorTimestamp(1785835631), new Date(1785835631 * 1000).toISOString());
+  assert.equal(parseCursorTimestamp(null), null);
+});
+
+test("fixture Cursor month is ok; 5h/week unavailable", () => {
+  const resp = buildFixtureResponse();
+  const cursor = resp.providers.find((p) => p.provider === "cursor");
+  if (!cursor) throw new Error("cursor provider missing from fixture");
+  assert.equal(cursor.windows.five_hour.status, "unavailable");
+  assert.equal(cursor.windows.week.status, "unavailable");
+  assert.equal(cursor.windows.month.status, "ok");
+  assert.equal(cursor.windows.month.remainingPercent, Math.max(0, 100 - cursor.windows.month.usedPercent!));
+});
+
+test("buildCursorBilling maps Total / First-party / API like Cursor bill UI", () => {
+  const billing = buildCursorBilling(
+    {
+      billingCycleEnd: "1785835631000",
+      planUsage: {
+        totalPercentUsed: 23.276,
+        autoPercentUsed: 12.86875,
+        apiPercentUsed: 98.97,
+        limit: 7000,
+      },
+      displayMessage: "You've hit your usage limit",
+    },
+    "pro_plus",
+  );
+  assert.equal(billing.planLabel, "Included in Pro+");
+  assert.equal(billing.totalPercentUsed, 23);
+  assert.equal(billing.autoPercentUsed, 13);
+  assert.equal(billing.apiPercentUsed, 99);
+  assert.equal(billing.remainingPercent, 77);
+  assert.match(billing.apiNote ?? "", /\$70/);
+});
+
+test("formatPlanLabel maps membership types", () => {
+  assert.equal(formatPlanLabel("pro_plus"), "Included in Pro+");
+  assert.equal(formatPlanLabel("pro"), "Included in Pro");
+  assert.equal(formatPlanLabel(null), "Included in plan");
+});
+
+test("fixture Cursor includes billing breakdown", () => {
+  const resp = buildFixtureResponse();
+  const cursor = resp.providers.find((p) => p.provider === "cursor");
+  if (!cursor?.billing) throw new Error("cursor billing missing from fixture");
+  assert.equal(cursor.billing.planLabel, "Included in Pro+");
+  assert.equal(cursor.billing.totalPercentUsed, 23);
+  assert.equal(cursor.billing.autoPercentUsed, 13);
+  assert.equal(cursor.billing.apiPercentUsed, 99);
 });

@@ -1,17 +1,20 @@
 # Token Usage Dashboard
 
-A small local dashboard that visualizes **OpenAI (Codex)** and **OpenCode** token usage and the percentage remaining across three windows: **5-hour**, **weekly**, and **monthly**.
+Local dashboard + Windows corner widget for **multi-harness** token / plan usage:
+
+OpenAI Codex · OpenCode Go · Cursor · Claude · OpenRouter · Kimi Code · Z.AI / GLM · Grok Build
 
 - TypeScript Node server + static HTML/CSS/JS UI (no React, no Vite, minimal deps).
 - Serves the UI and a single `GET /api/usage` endpoint.
-- Offline fixture mode for verification without Codex or the OpenCode DB.
+- Interactive setup CLI (`npm run setup`) writes `config.json` (providers + secrets).
+- Offline fixture mode returns all 8 providers for demos / verification.
 - Never logs or prints auth tokens. `config.json` is git-ignored; only `config.example.json` is committed.
 
 ## Requirements
 
 - Node.js 18+ (developed on Node 23).
-- `sqlite3` CLI on `PATH` for OpenCode DB reads (e.g. `winget install SQLite.SQLite` or `scoop install sqlite`). The adapter gives a clear error if it is missing.
-- The `codex` CLI installed and logged in if you want live OpenAI numbers (the OpenAI adapter calls `getCodexStatus()` from `codex-status-mcp`, which talks to Codex's local app-server).
+- `sqlite3` CLI on `PATH` for Cursor auth reads from `state.vscdb` and optional OpenCode local-DB fallback.
+- Per-provider auth (see table below). OpenCode Go still needs a website session cookie until OpenCode ships a usage API.
 
 ## Install
 
@@ -19,36 +22,58 @@ A small local dashboard that visualizes **OpenAI (Codex)** and **OpenCode** toke
 npm install
 ```
 
-## Configure
+## Setup
 
-Copy the example config and edit caps as desired:
+Preferred path — interactive Q&A (enable providers, paste keys or press Enter to use env/file):
+
+```bash
+npm run setup
+```
+
+Noninteractive defaults (built-in trio on; new harnesses off):
+
+```bash
+npm run setup:defaults
+# or: npm run setup -- --defaults
+```
+
+Enable every provider flag without prompting for secrets:
+
+```bash
+npm run setup:all
+# or: npm run setup -- --defaults --all
+```
+
+Or copy and edit manually:
 
 ```bash
 cp config.example.json config.json
 ```
 
-`config.json` (optional — defaults work without it):
+Secrets may also live in env vars (`OPENROUTER_API_KEY`, `KIMI_CODE_API_KEY`, `ZAI_API_KEY` / `GLM_API_KEY`, `GROK_CLI_OAUTH_TOKEN`, `CLAUDE_ACCESS_TOKEN`, `OPENCODE_GO_AUTH_COOKIE`, …) — `loadConfig` prefers env over `config.json`.
 
-```json
-{
-  "opencode": {
-    "dbPath": null,
-    "caps": {
-      "five_hour": 250000,
-      "week": 3000000,
-      "month": 12000000
-    }
-  },
-  "server": {
-    "port": 4321,
-    "host": "127.0.0.1"
-  }
-}
-```
+### Providers
 
-- `opencode.dbPath`: override the OpenCode SQLite path. Defaults to `%USERPROFILE%\.local\share\opencode\opencode.db`. Can also be set via `OPENCODE_DB_PATH`.
-- `opencode.caps.*`: soft token caps per window, used to compute `remainingPercent`. `null` means "uncapped" — the dashboard still shows used tokens but reports remaining as `uncapped`.
-- `server.port` / `server.host`: bind for the HTTP server. `PORT` env var overrides the port.
+| Provider | Auth source | Metrics shown |
+|---|---|---|
+| **OpenAI Codex** | Logged-in `codex` / `codex-status-mcp` | 5h / week / month remaining % (as reported) |
+| **OpenCode Go** | Website `auth` cookie (+ optional workspace id) until API ships; API key alone is not enough yet | Rolling / week / month used % |
+| **Cursor** | Desktop `state.vscdb` token (or `CURSOR_TOKEN`) | Billing cycle: total / first-party / API % |
+| **Claude** | `~/.claude/.credentials.json` OAuth or `CLAUDE_ACCESS_TOKEN` | 5h / week used % |
+| **OpenRouter** | `OPENROUTER_API_KEY` / `openrouter.apiKey` (credits key) | Prepaid USD balance remaining |
+| **Kimi Code** | `KIMI_CODE_API_KEY` or `~/.kimi/credentials/kimi-code.json` | 5h / week used % |
+| **Z.AI / GLM** | `ZAI_API_KEY` or `GLM_API_KEY` | Session / week used % |
+| **Grok Build** | `grok login` → `~/.grok/auth.json` or `GROK_CLI_OAUTH_TOKEN` | Credits remaining (or month %) |
+
+**OpenCode note:** your terminal API key is already tried against `GET /zen/go/v1/usage`, but that endpoint is still not live. Until OpenCode ships it, live Go meters need the website session cookie (`opencode.go.authCookie` / `OPENCODE_GO_AUTH_COOKIE`).
+
+## Configure (manual)
+
+`config.example.json` documents `providers{}`, OpenCode Go, OpenRouter, Kimi, Z.AI, Grok, Claude, and `server`.
+
+- `providers.<id>`: poll toggle (defaults: openai/opencode/cursor on; others off).
+- `opencode.go.authCookie`: required for live OpenCode Go meters today.
+- `server.port` / `server.host`: bind address (`PORT` env overrides port).
 
 ## Run
 
@@ -57,115 +82,66 @@ npm run dev     # tsx watch (auto-restart on edits)
 npm start       # one-shot run
 ```
 
-Then open <http://127.0.0.1:4321>.
+Then open <http://127.0.0.1:4321>. The UI auto-refreshes every 60 seconds.
 
-The UI auto-refreshes every 60 seconds.
+## Windows corner widget
 
-## Offline / fixture mode
+Always-on-top frameless window anchored to the bottom-right of the primary display work area. Starts the usage server if it is not already running. Lives in the system tray (click to show/hide).
 
 ```bash
-USAGE_FIXTURE=1 npm start
+npm run widget:bg          # detached (normal use)
+npm run widget             # attached (debug)
+npm run widget:startup     # log in at Windows startup
 ```
 
-Returns realistic fixture payloads for both providers without contacting Codex or the OpenCode DB. Useful for screenshots, demos, and CI.
+Fixture mode is **test/demo only**:
+
+```powershell
+$env:USAGE_FIXTURE=1; npm start
+npx electron . --fixture
+```
 
 ## Verify
 
 ```bash
-npm run typecheck                 # tsc --noEmit, exits 0
-npm test                          # node:test suite
-USAGE_FIXTURE=1 npm test           # tests pass in fixture mode too
-USAGE_FIXTURE=1 node --import tsx src/server.ts   # serve fixtures
-curl http://127.0.0.1:4321/api/usage
-curl http://127.0.0.1:4321/api/health
+npm run typecheck
+npm test
+npm run verify
 ```
 
 ## API
 
 ### `GET /api/usage`
 
-Returns:
-
-```json
-{
-  "fetchedAt": "2026-07-19T05:44:00.000Z",
-  "fixture": false,
-  "providers": [
-    {
-      "provider": "openai",
-      "label": "OpenAI Codex",
-      "fetchedAt": "2026-07-19T05:44:00.000Z",
-      "windows": {
-        "five_hour": {
-          "usedPercent": 45,
-          "remainingPercent": 55,
-          "resetsAtIso": "2026-07-19T10:00:00.000Z",
-          "status": "ok"
-        },
-        "week": { "usedPercent": 12, "remainingPercent": 88, "resetsAtIso": "...", "status": "ok" },
-        "month": { "usedPercent": null, "remainingPercent": null, "status": "unavailable", "reason": "..." }
-      }
-    },
-    {
-      "provider": "opencode",
-      "label": "OpenCode",
-      "fetchedAt": "...",
-      "windows": {
-        "five_hour": { "usedPercent": 73.8, "remainingPercent": 26.2, "usedTokens": 184500, "status": "ok" },
-        "week":     { "usedPercent": 64.0, "remainingPercent": 36.0, "usedTokens": 1920000, "status": "ok" },
-        "month":    { "usedPercent": 61.75, "remainingPercent": 38.25, "usedTokens": 7410000, "status": "ok" }
-      }
-    }
-  ]
-}
-```
-
-`WindowUsage` shape:
-
-- `usedPercent`: number | null
-- `remainingPercent`: number | null (null when uncapped or unavailable)
-- `usedTokens`: number | null (OpenCode only)
-- `resetsAtIso`: ISO string | null
-- `status`: `"ok"` | `"unavailable"` | `"error"`
-- `reason`: optional human-readable note when not `ok`
+Returns `{ fetchedAt, fixture, providers[] }`. Each provider has `windows` (5h/week/month). Cursor may include `billing`; OpenRouter / Grok may include `balance`.
 
 ### `GET /api/health`
 
 ```json
-{ "status": "ok", "fixture": false, "time": "2026-07-19T05:44:00.000Z" }
+{ "status": "ok", "fixture": false, "time": "…" }
 ```
-
-## How it works
-
-- **OpenAI**: calls `getCodexStatus()` from `codex-status-mcp`. Prefers `rateLimitsByLimitId["codex"]` (the plan-level limit) over model-specific spark limits. Each reported window is mapped to `five_hour` / `week` / `month` by `windowDurationMins` (≈300 / 10080 / 43200, 25% tolerance). Windows Codex did not report are returned as `status: "unavailable"` with a reason — never a fake percentage.
-- **OpenCode**: reads `message.data` JSON from the OpenCode SQLite DB via `sqlite3 -json` (no native bindings). Sums `tokens.total` when present, otherwise `input + output + reasoning + cache.read + cache.write`, for messages whose timestamp falls in each window. Timestamps are auto-detected as seconds or milliseconds. Soft caps from `config.json` produce `remainingPercent`; without a cap, `remainingPercent` is `null` but `usedTokens` is still shown.
 
 ## Project layout
 
 ```
 token-usage-dashboard/
 ├── package.json
-├── tsconfig.json
 ├── config.example.json
-├── README.md
 ├── src/
 │   ├── types.ts
 │   ├── config.ts
 │   ├── fixtures.ts
 │   ├── server.ts
-│   └── adapters/
-│       ├── openai.ts
-│       └── opencode.ts
-├── public/
-│   ├── index.html
-│   ├── app.js
-│   └── styles.css
+│   ├── cli/setup.ts
+│   ├── providers/registry.ts
+│   └── adapters/          # openai, opencode, cursor, claude, openrouter, kimi, zai, grok
+├── public/                # dashboard + widget
+├── desktop/               # Electron corner widget
 └── tests/
-    └── usage.test.ts
 ```
 
 ## Security
 
 - `config.json` is git-ignored.
-- The OpenAI adapter passes `includeEmail: false` and never logs tokens.
-- The server binds to `127.0.0.1` by default so it is not exposed on the network.
+- Adapters never log tokens.
+- The server binds to `127.0.0.1` by default.
