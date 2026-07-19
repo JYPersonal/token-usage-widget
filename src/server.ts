@@ -5,9 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, isFixtureMode } from "./config.js";
 import { buildFixtureResponse } from "./fixtures.js";
-import { fetchOpenAIUsage } from "./adapters/openai.js";
-import { fetchOpenCodeUsage } from "./adapters/opencode.js";
-import type { ProviderUsage, UsageResponse } from "./types.js";
+import { fetchEnabledProviders } from "./providers/registry.js";
+import type { UsageResponse } from "./types.js";
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 
@@ -34,11 +33,7 @@ async function gatherUsage(): Promise<UsageResponse> {
     return buildFixtureResponse();
   }
   const cfg = await loadConfig();
-  const [openai, opencode] = await Promise.all([
-    fetchOpenAIUsage(),
-    fetchOpenCodeUsage(cfg),
-  ]);
-  const providers: ProviderUsage[] = [openai, opencode];
+  const providers = await fetchEnabledProviders(cfg);
   return {
     fetchedAt: new Date().toISOString(),
     fixture: false,
