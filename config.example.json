@@ -2,9 +2,9 @@
   "opencode": {
     "dbPath": null,
     "caps": {
-      "five_hour": null,
-      "week": null,
-      "month": null
+      "five_hour": 250000,
+      "week": 3000000,
+      "month": 12000000
     }
   },
   "server": {
