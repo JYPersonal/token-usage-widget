@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
+  <script src="/fmt.js"></script>
 </head>
 <body>
   <div class="aurora" aria-hidden="true">
@@ -21,7 +22,7 @@
       <span class="brand-mark"></span>
       <div class="brand-text">
         <h1>Token Usage</h1>
-        <p class="tagline">Live view of OpenAI Codex &amp; OpenCode rate windows</p>
+        <p class="tagline">Multi-harness usage: Codex, OpenCode, Cursor, Claude, OpenRouter, Kimi, Z.AI, Grok</p>
       </div>
     </div>
     <div class="header-meta">
@@ -78,6 +79,61 @@
         </div>
       </dl>
     </article>
+  </template>
+
+  <template id="balance-template">
+    <div class="balance-block">
+      <p class="balance-label"></p>
+      <p class="balance-value">
+        <span class="balance-remaining"></span>
+        <span class="balance-unit"></span>
+      </p>
+      <p class="balance-reset"></p>
+    </div>
+  </template>
+
+  <template id="cursor-bill-template">
+    <div class="cursor-bill" data-expanded="true">
+      <p class="bill-plan"></p>
+      <div class="bill-total">
+        <div class="bill-row">
+          <span class="bill-row-label">Total</span>
+          <span class="bill-total-pct"></span>
+        </div>
+        <div class="bill-meter">
+          <div class="bill-meter-fill"></div>
+        </div>
+      </div>
+      <button type="button" class="bill-summary" aria-expanded="true">
+        <span class="bill-summary-text"></span>
+        <span class="bill-chevron" aria-hidden="true"></span>
+      </button>
+      <div class="bill-details">
+        <div class="bill-bucket bill-auto">
+          <div class="bill-row">
+            <span class="bill-row-label">First-party models</span>
+            <span class="bill-auto-pct"></span>
+          </div>
+          <div class="bill-meter bill-meter--thin">
+            <div class="bill-meter-fill"></div>
+          </div>
+          <p class="bill-note bill-auto-note"></p>
+        </div>
+        <div class="bill-bucket bill-api">
+          <div class="bill-row">
+            <span class="bill-row-label">API</span>
+            <span class="bill-api-pct"></span>
+          </div>
+          <div class="bill-meter bill-meter--thin">
+            <div class="bill-meter-fill"></div>
+          </div>
+          <p class="bill-note bill-api-note"></p>
+        </div>
+      </div>
+      <p class="bill-remaining"></p>
+      <p class="bill-reset"></p>
+      <p class="bill-error" hidden></p>
+    </div>
   </template>
 
   <script src="/app.js"></script>

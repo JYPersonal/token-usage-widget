@@ -260,7 +260,10 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-faint);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+  text-align: right;
+  max-width: 62%;
+  line-height: 1.35;
 }
 
 .meter {
@@ -392,6 +395,201 @@ body {
 
 .site-footer.error #footer-status {
   color: var(--danger);
+}
+
+/* Cursor Pro+ billing card */
+.windows--billing {
+  gap: 0;
+}
+
+.cursor-bill {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 2px;
+}
+
+.bill-plan {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+}
+
+.bill-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.bill-row-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.bill-total-pct,
+.bill-auto-pct,
+.bill-api-pct {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.bill-meter {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.bill-meter--thin {
+  height: 6px;
+}
+
+.bill-meter-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: #4c8dff;
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.bill-meter-fill[data-tone="warn"] {
+  background: #ffb86b;
+}
+
+.bill-meter-fill[data-tone="danger"] {
+  background: #ff6b8b;
+}
+
+.bill-meter-fill[data-tone="ghost"] {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.bill-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bill-summary:hover {
+  color: var(--ink);
+}
+
+.bill-chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-135deg);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.cursor-bill[data-expanded="false"] .bill-chevron {
+  transform: rotate(45deg);
+}
+
+.bill-details {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 4px;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bill-bucket {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.bill-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+.bill-remaining {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.bill-reset {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+
+.bill-error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--danger);
+  word-break: break-word;
+}
+
+.balance-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 0 8px;
+}
+
+.balance-label {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.balance-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.balance-unit {
+  margin-left: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.balance-reset {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
 }
 
 @media (max-width: 720px) {
