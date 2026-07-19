@@ -3,3 +3,6 @@ dist/
 config.json
 *.log
 .DS_Store
+
+.cursor-harness/
+
