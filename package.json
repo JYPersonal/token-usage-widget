@@ -1,0 +1,30 @@
+{
+  "name": "token-usage-dashboard",
+  "version": "1.0.0",
+  "description": "Local dashboard for OpenAI (Codex) + OpenCode token usage and remaining percent across 5h / week / month windows.",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "tokens",
+    "usage",
+    "dashboard",
+    "codex",
+    "opencode"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "codex-status-mcp": "^0.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.19",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
