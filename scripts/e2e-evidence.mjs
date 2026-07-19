@@ -147,7 +147,8 @@ async function main() {
     // Launch Electron against this already-running server (widget will reuse health)
     const electron = path.join(ROOT, "node_modules", "electron", "dist", "electron.exe");
     if (!fs.existsSync(electron)) throw new Error(`missing ${electron}`);
-    widgetProc = spawn(electron, [ROOT], {
+    // Electron main strips USAGE_FIXTURE unless argv includes --fixture (product path stays live).
+    widgetProc = spawn(electron, [ROOT, "--fixture"], {
       cwd: ROOT,
       env: { ...process.env, PORT: String(PORT), USAGE_FIXTURE: "1", NODE_BINARY: resolveNodeBinary(process.env) },
       stdio: "ignore",
@@ -158,7 +159,16 @@ async function main() {
     await new Promise((r) => setTimeout(r, 8000));
 
     const stillHealthy = await healthCheck("127.0.0.1", PORT);
-    const electronAlive = widgetProc.exitCode === null && !widgetProc.killed;
+    // On Windows detached Electron may report exitCode early for the launcher; treat pid alive as success.
+    let electronAlive = widgetProc.exitCode === null && !widgetProc.killed;
+    if (!electronAlive && widgetProc.pid) {
+      try {
+        process.kill(widgetProc.pid, 0);
+        electronAlive = true;
+      } catch {
+        electronAlive = false;
+      }
+    }
     lines.push(`- electron pid: **${widgetProc.pid}**`);
     lines.push(`- electron still running after 8s: **${electronAlive}**`);
     lines.push(`- API still healthy under widget: **${stillHealthy}**`);
