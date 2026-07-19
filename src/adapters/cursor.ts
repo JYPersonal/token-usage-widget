@@ -1,0 +1,265 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import path from "node:path";
+import os from "node:os";
+import type {
+  CursorBillingBreakdown,
+  ProviderUsage,
+  WindowId,
+  WindowUsage,
+} from "../types.js";
+
+const execFileAsync = promisify(execFile);
+
+const DASHBOARD_URL =
+  "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+
+export interface CursorPeriodUsage {
+  billingCycleStart?: string | number;
+  billingCycleEnd?: string | number;
+  planUsage?: {
+    totalPercentUsed?: number;
+    autoPercentUsed?: number;
+    apiPercentUsed?: number;
+    totalSpend?: number;
+    includedSpend?: number;
+    limit?: number;
+    bonusTooltip?: string;
+  };
+  displayMessage?: string;
+  autoModelSelectedDisplayMessage?: string;
+  namedModelSelectedDisplayMessage?: string;
+}
+
+function unavailable(reason: string): WindowUsage {
+  return {
+    usedPercent: null,
+    remainingPercent: null,
+    status: "unavailable",
+    reason,
+  };
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+function roundPct(n: number): number {
+  return Math.round(n);
+}
+
+function clampPct(n: number): number {
+  return Math.min(100, Math.max(0, n));
+}
+
+/** Cursor billingCycle* fields arrive as unix-ms strings or numbers. */
+export function parseCursorTimestamp(value: string | number | undefined | null): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const ms = n < 1e12 ? n * 1000 : n;
+  return new Date(ms).toISOString();
+}
+
+export function formatPlanLabel(membership: string | null | undefined): string {
+  const raw = (membership ?? "").trim().toLowerCase();
+  if (!raw) return "Included in plan";
+  const map: Record<string, string> = {
+    pro_plus: "Included in Pro+",
+    proplus: "Included in Pro+",
+    pro: "Included in Pro",
+    free: "Included in Free",
+    business: "Included in Business",
+    team: "Included in Team",
+    ultra: "Included in Ultra",
+  };
+  if (map[raw]) return map[raw];
+  const pretty = raw
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  return `Included in ${pretty}`;
+}
+
+export function mapCursorPeriod(period: CursorPeriodUsage | null | undefined): Record<WindowId, WindowUsage> {
+  const windows: Record<WindowId, WindowUsage> = {
+    five_hour: unavailable("Cursor does not expose a 5-hour rolling usage window."),
+    week: unavailable("Cursor does not expose a weekly rolling usage window."),
+    month: unavailable("Cursor did not report billing-cycle plan usage."),
+  };
+
+  const used = period?.planUsage?.totalPercentUsed;
+  if (typeof used !== "number" || !Number.isFinite(used)) {
+    return windows;
+  }
+
+  const clamped = clampPct(used);
+  windows.month = {
+    usedPercent: round1(clamped),
+    remainingPercent: round1(Math.max(0, 100 - clamped)),
+    resetsAtIso: parseCursorTimestamp(period?.billingCycleEnd),
+    status: "ok",
+  };
+  return windows;
+}
+
+export function buildCursorBilling(
+  period: CursorPeriodUsage | null | undefined,
+  membership: string | null | undefined,
+): CursorBillingBreakdown {
+  const plan = period?.planUsage;
+  const total =
+    typeof plan?.totalPercentUsed === "number" && Number.isFinite(plan.totalPercentUsed)
+      ? roundPct(clampPct(plan.totalPercentUsed))
+      : null;
+  const auto =
+    typeof plan?.autoPercentUsed === "number" && Number.isFinite(plan.autoPercentUsed)
+      ? roundPct(clampPct(plan.autoPercentUsed))
+      : null;
+  const api =
+    typeof plan?.apiPercentUsed === "number" && Number.isFinite(plan.apiPercentUsed)
+      ? roundPct(clampPct(plan.apiPercentUsed))
+      : null;
+
+  const includedCents =
+    typeof plan?.limit === "number" && Number.isFinite(plan.limit)
+      ? plan.limit
+      : typeof plan?.includedSpend === "number" && Number.isFinite(plan.includedSpend)
+        ? plan.includedSpend
+        : null;
+  const includedUsd =
+    includedCents !== null && includedCents > 0 ? Math.round(includedCents / 100) : null;
+
+  return {
+    planLabel: formatPlanLabel(membership),
+    totalPercentUsed: total,
+    autoPercentUsed: auto,
+    apiPercentUsed: api,
+    remainingPercent: total !== null ? Math.max(0, 100 - total) : null,
+    resetsAtIso: parseCursorTimestamp(period?.billingCycleEnd),
+    autoNote: "Additional usage beyond limits consumes API quota or on-demand spend.",
+    apiNote:
+      includedUsd !== null
+        ? `Additional usage beyond limits consumes on-demand spend. Your plan includes at least $${includedUsd} of API usage.`
+        : "Additional usage beyond limits consumes on-demand spend.",
+    displayMessage: period?.displayMessage,
+  };
+}
+
+function stateDbPath(): string {
+  return (
+    process.env.CURSOR_STATE_DB?.trim() ||
+    path.join(
+      process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"),
+      "Cursor",
+      "User",
+      "globalStorage",
+      "state.vscdb",
+    )
+  );
+}
+
+async function sqliteGet(dbPath: string, sql: string): Promise<string> {
+  try {
+    const result = await execFileAsync("sqlite3", [dbPath, sql], {
+      windowsHide: true,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    });
+    return String(result.stdout).trim();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/ENOENT|not recognized|not found/i.test(msg)) {
+      throw new Error("sqlite3 CLI not found on PATH (needed to read Cursor auth from state.vscdb).");
+    }
+    throw new Error(`Failed to read Cursor state.vscdb: ${msg}`);
+  }
+}
+
+export async function readCursorAccessToken(): Promise<string> {
+  const fromEnv = process.env.CURSOR_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+
+  const stdout = await sqliteGet(
+    stateDbPath(),
+    "SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken';",
+  );
+  if (!stdout) {
+    throw new Error("No cursorAuth/accessToken in Cursor state.vscdb — sign in to Cursor and retry.");
+  }
+  return stdout;
+}
+
+export async function readCursorMembership(): Promise<string | null> {
+  try {
+    const value = await sqliteGet(
+      stateDbPath(),
+      "SELECT value FROM ItemTable WHERE key='cursorAuth/stripeMembershipType';",
+    );
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchCurrentPeriodUsage(token: string): Promise<CursorPeriodUsage> {
+  const res = await fetch(DASHBOARD_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "Connect-Protocol-Version": "1",
+      "User-Agent": "token-usage-dashboard",
+    },
+    body: "{}",
+  });
+  if (!res.ok) {
+    throw new Error(`Cursor GetCurrentPeriodUsage HTTP ${res.status}`);
+  }
+  return (await res.json()) as CursorPeriodUsage;
+}
+
+export async function fetchCursorUsage(): Promise<ProviderUsage> {
+  const fetchedAt = new Date().toISOString();
+  try {
+    const [token, membership] = await Promise.all([readCursorAccessToken(), readCursorMembership()]);
+    const period = await fetchCurrentPeriodUsage(token);
+    return {
+      provider: "cursor",
+      label: "Cursor",
+      windows: mapCursorPeriod(period),
+      billing: buildCursorBilling(period, membership),
+      fetchedAt,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      provider: "cursor",
+      label: "Cursor",
+      windows: {
+        five_hour: unavailable("Cursor usage unavailable."),
+        week: unavailable("Cursor usage unavailable."),
+        month: unavailable("Cursor usage unavailable."),
+      },
+      billing: {
+        planLabel: "Included in plan",
+        totalPercentUsed: null,
+        autoPercentUsed: null,
+        apiPercentUsed: null,
+        remainingPercent: null,
+      },
+      fetchedAt,
+      error: msg,
+    };
+  }
+}
+
+export const __test = {
+  mapCursorPeriod,
+  parseCursorTimestamp,
+  buildCursorBilling,
+  formatPlanLabel,
+  round1,
+};
