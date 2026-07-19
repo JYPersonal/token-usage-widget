@@ -7,3 +7,6 @@ config.json
 .cursor-harness/
 .cursor/
 
+
+artifacts/
+
