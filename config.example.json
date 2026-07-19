@@ -1,11 +1,40 @@
 {
+  "providers": {
+    "openai": true,
+    "opencode": true,
+    "cursor": true,
+    "claude": false,
+    "openrouter": false,
+    "kimi": false,
+    "zai": false,
+    "grok": false
+  },
   "opencode": {
     "dbPath": null,
     "caps": {
-      "five_hour": 250000,
-      "week": 3000000,
-      "month": 12000000
+      "five_hour": null,
+      "week": null,
+      "month": null
+    },
+    "go": {
+      "workspaceId": null,
+      "authCookie": null
     }
+  },
+  "openrouter": {
+    "apiKey": null
+  },
+  "kimi": {
+    "apiKey": null
+  },
+  "zai": {
+    "apiKey": null
+  },
+  "grok": {
+    "oauthToken": null
+  },
+  "claude": {
+    "accessToken": null
   },
   "server": {
     "port": 4321,
