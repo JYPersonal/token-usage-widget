@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Token Usage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="blob blob-a"></span>
+    <span class="blob blob-b"></span>
+    <span class="blob blob-c"></span>
+  </div>
+
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <div class="brand-text">
+        <h1>Token Usage</h1>
+        <p class="tagline">Live view of OpenAI Codex &amp; OpenCode rate windows</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span id="fixture-badge" class="badge badge--ghost" hidden>FIXTURE</span>
+      <span id="refresh-clock" class="refresh-clock">--:--:--</span>
+      <span class="refresh-pulse" title="Auto-refresh every 60s"></span>
+    </div>
+  </header>
+
+  <main class="providers" id="providers">
+    <!-- provider columns injected by app.js -->
+  </main>
+
+  <footer class="site-footer">
+    <span id="footer-status">Connecting…</span>
+    <span class="footer-hint">Auto-refresh 60s</span>
+  </footer>
+
+  <template id="provider-template">
+    <section class="provider">
+      <header class="provider-head">
+        <h2 class="provider-title"></h2>
+        <span class="provider-sub"></span>
+      </header>
+      <div class="windows"></div>
+      <p class="provider-error" hidden></p>
+    </section>
+  </template>
+
+  <template id="window-template">
+    <article class="window">
+      <header class="window-head">
+        <span class="window-label"></span>
+        <span class="window-reset"></span>
+      </header>
+      <div class="meter">
+        <div class="meter-fill"></div>
+        <div class="meter-ticks" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+      <dl class="window-stats">
+        <div class="stat">
+          <dt>Used</dt>
+          <dd class="stat-used"></dd>
+        </div>
+        <div class="stat">
+          <dt>Remaining</dt>
+          <dd class="stat-remaining"></dd>
+        </div>
+        <div class="stat stat--tokens">
+          <dt>Tokens</dt>
+          <dd class="stat-tokens"></dd>
+        </div>
+      </dl>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>
