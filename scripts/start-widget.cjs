@@ -18,16 +18,34 @@ function resolveLaunchPlan({
   env = process.env,
   fs: fileSystem = fs,
 } = {}) {
-  if (platform !== "darwin") {
-    throw new Error(`Unsupported widget launch platform: ${platform}`);
-  }
-
   const checkoutPath = path.resolve(checkout);
   requirePath(
     fileSystem,
     path.join(checkoutPath, "package.json"),
     "Invalid widget checkout: package.json",
   );
+
+  if (platform === "win32") {
+    const commandLauncher = path.join(checkoutPath, "scripts", "start-widget.cmd");
+    requirePath(fileSystem, commandLauncher, "Windows widget launcher");
+    return {
+      platform,
+      command: env.ComSpec || env.COMSPEC || "cmd.exe",
+      args: ["/d", "/s", "/c", `"${commandLauncher}"`],
+      options: {
+        cwd: checkoutPath,
+        env: { ...env },
+        detached: false,
+        stdio: "inherit",
+      },
+      waitForExit: true,
+    };
+  }
+
+  if (platform !== "darwin") {
+    throw new Error(`Unsupported widget launch platform: ${platform}`);
+  }
+
   requirePath(fileSystem, nodeExecPath, "Current Node executable");
 
   const electronRoot = path.join(checkoutPath, "node_modules", "electron");
@@ -77,26 +95,64 @@ function spawnLaunchPlan(plan, { spawn = childProcess.spawn } = {}) {
       return;
     }
 
-    const onError = (error) => {
+    function removeLaunchListeners() {
+      child.removeListener("error", onError);
       child.removeListener("spawn", onSpawn);
+      child.removeListener("close", onClose);
+    }
+
+    function onError(error) {
+      removeLaunchListeners();
       try {
         child.kill?.();
       } catch {
         // The failed child may never have reached an OS process.
       }
       reject(spawnError(plan, error));
-    };
-    const onSpawn = () => {
-      child.removeListener("error", onError);
+    }
+
+    function onClose(code, signal) {
+      removeLaunchListeners();
+      if (code === 0) {
+        resolve(child);
+        return;
+      }
+      const outcome = code === null ? `signal ${signal || "unknown"}` : `code ${code}`;
+      reject(new Error(`Windows widget launcher exited with ${outcome}`));
+    }
+
+    function onSpawn() {
+      if (plan.waitForExit) {
+        return;
+      }
+      removeLaunchListeners();
       if (plan.options.detached) {
         child.unref();
       }
       resolve(child);
-    };
+    }
 
     child.once("error", onError);
     child.once("spawn", onSpawn);
+    if (plan.waitForExit) {
+      child.once("close", onClose);
+    }
   });
 }
 
-module.exports = { resolveLaunchPlan, spawnLaunchPlan };
+function launchWidget(options, dependencies) {
+  return spawnLaunchPlan(resolveLaunchPlan(options), dependencies);
+}
+
+async function main() {
+  await launchWidget();
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`Widget launch failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { launchWidget, main, resolveLaunchPlan, spawnLaunchPlan };

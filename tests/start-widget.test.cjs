@@ -5,9 +5,11 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const {
+  launchWidget,
   resolveLaunchPlan,
   spawnLaunchPlan,
 } = require("../scripts/start-widget.cjs");
+const packageJson = require("../package.json");
 
 function createFileSystem(files) {
   const contents = new Map(Object.entries(files));
@@ -23,6 +25,11 @@ function createFileSystem(files) {
     },
   };
 }
+
+test("the documented background npm command uses the platform dispatcher and runs its regression tests", () => {
+  assert.equal(packageJson.scripts["widget:bg"], "node scripts/start-widget.cjs");
+  assert.match(packageJson.scripts.test, /tests\/start-widget\.test\.cjs/);
+});
 
 test("Darwin launch planning uses checkout-local Electron and the current Node on Intel and Apple Silicon", () => {
   const checkout = "/workspace/token-usage-dashboard";
@@ -59,6 +66,39 @@ test("Darwin launch planning uses checkout-local Electron and the current Node o
   assert.equal("USAGE_FIXTURE" in intelPlan.options.env, false);
 });
 
+test("the background launcher resolves and starts the checkout in one command", async () => {
+  const checkout = "/workspace/token-usage-dashboard";
+  const electronRoot = path.join(checkout, "node_modules", "electron");
+  const electronRelativePath = "Electron.app/Contents/MacOS/Electron";
+  const electronExecutable = path.join(electronRoot, "dist", electronRelativePath);
+  const nodeExecPath = "/opt/current-node/bin/node";
+  const fileSystem = createFileSystem({
+    [path.join(checkout, "package.json")]: "{}",
+    [path.join(electronRoot, "package.json")]: "{}",
+    [path.join(electronRoot, "path.txt")]: electronRelativePath,
+    [electronExecutable]: "",
+    [nodeExecPath]: "",
+  });
+  const child = new EventEmitter();
+  let unrefCount = 0;
+  child.unref = () => {
+    unrefCount += 1;
+  };
+
+  const launchedChild = await launchWidget(
+    { platform: "darwin", checkout, nodeExecPath, env: {}, fs: fileSystem },
+    {
+      spawn() {
+        queueMicrotask(() => child.emit("spawn"));
+        return child;
+      },
+    },
+  );
+
+  assert.equal(launchedChild, child);
+  assert.equal(unrefCount, 1);
+});
+
 test("Darwin launch rejects an invalid checkout with the exact missing package path", () => {
   const checkout = "/missing/token-usage-dashboard";
   const packagePath = path.join(checkout, "package.json");
@@ -92,6 +132,31 @@ test("Darwin launch reports how to restore a missing checkout-local Electron dep
   );
 });
 
+test("Win32 planning delegates to the established CMD launcher from the checkout", () => {
+  const checkout = "/workspace/token-usage-dashboard";
+  const commandLauncher = path.join(checkout, "scripts", "start-widget.cmd");
+  const comSpec = "C:\\Windows\\System32\\cmd.exe";
+  const fileSystem = createFileSystem({
+    [path.join(checkout, "package.json")]: "{}",
+    [commandLauncher]: "",
+  });
+
+  const plan = resolveLaunchPlan({
+    platform: "win32",
+    checkout,
+    env: { ComSpec: comSpec, USAGE_FIXTURE: "1" },
+    fs: fileSystem,
+  });
+
+  assert.equal(plan.command, comSpec);
+  assert.deepEqual(plan.args, ["/d", "/s", "/c", `"${commandLauncher}"`]);
+  assert.equal(plan.options.cwd, checkout);
+  assert.equal(plan.options.detached, false);
+  assert.equal(plan.options.stdio, "inherit");
+  assert.equal(plan.options.env.USAGE_FIXTURE, "1");
+  assert.equal(plan.waitForExit, true);
+});
+
 test("Darwin launch detaches only after the child reports a successful spawn", async () => {
   const plan = {
     platform: "darwin",
@@ -122,6 +187,27 @@ test("Darwin launch detaches only after the child reports a successful spawn", a
     args: plan.args,
     options: plan.options,
   });
+});
+
+test("Win32 dispatch waits for the CMD launcher and propagates its failure", async () => {
+  const plan = {
+    platform: "win32",
+    command: "C:\\Windows\\System32\\cmd.exe",
+    args: ["/d", "/s", "/c", '"C:\\workspace\\scripts\\start-widget.cmd"'],
+    options: { cwd: "C:\\workspace", detached: false, stdio: "inherit", env: {} },
+    waitForExit: true,
+  };
+  const child = new EventEmitter();
+  child.kill = () => {};
+  const launch = spawnLaunchPlan(plan, { spawn: () => child });
+
+  child.emit("spawn");
+  child.emit("close", 7, null);
+
+  await assert.rejects(
+    launch,
+    { message: "Windows widget launcher exited with code 7" },
+  );
 });
 
 test("Darwin spawn errors identify the executable and do not leave an unreferenced child", async () => {

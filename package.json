@@ -11,9 +11,9 @@
     "setup:defaults": "tsx src/cli/setup.ts --defaults",
     "setup:all": "tsx src/cli/setup.ts --defaults --all",
     "widget": "electron .",
-    "widget:bg": "scripts\\start-widget.cmd",
+    "widget:bg": "node scripts/start-widget.cjs",
     "widget:startup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-widget.ps1 -InstallStartup",
-    "test": "node --import tsx --test tests/usage.test.ts tests/providers.test.ts tests/e2e-smoke.test.ts tests/server-launch.test.cjs tests/format-reset.test.cjs tests/widget-compact.test.cjs",
+    "test": "node --import tsx --test tests/usage.test.ts tests/providers.test.ts tests/e2e-smoke.test.ts tests/server-launch.test.cjs tests/start-widget.test.cjs tests/format-reset.test.cjs tests/widget-compact.test.cjs",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test && node scripts/e2e-evidence.mjs"
   },
