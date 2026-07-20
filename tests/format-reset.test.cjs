@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { formatReset, formatResetShort } = require("../public/fmt.js");
+const { formatReset, formatResetShort, formatResetWhen } = require("../public/fmt.js");
 
 test("formatReset returns empty for null/invalid", () => {
   assert.equal(formatReset(null), "");
@@ -46,4 +46,14 @@ test("formatResetShort returns compact countdown", () => {
     "2h 15m",
   );
   assert.equal(formatResetShort(new Date(now + 45 * 60 * 1000).toISOString(), now), "45m");
+});
+
+test("formatResetWhen returns locale absolute time, not ISO", () => {
+  assert.equal(formatResetWhen(null), "");
+  assert.equal(formatResetWhen("not-a-date"), "");
+  const iso = "2026-08-04T09:27:11.000Z";
+  const out = formatResetWhen(iso);
+  assert.ok(out.length >= 4);
+  assert.doesNotMatch(out, /T\d{2}:\d{2}:\d{2}/);
+  assert.doesNotMatch(out, /Z$/);
 });

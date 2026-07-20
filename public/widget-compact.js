@@ -12,18 +12,25 @@
     return `${Math.round(Number(v))}%`;
   }
 
-  function shortReset(iso, nowMs) {
-    const fmt = globalThis.TokenUsageFmt;
-    if (fmt?.formatResetShort) return fmt.formatResetShort(iso, nowMs) || "";
+  function fmtApi() {
+    if (globalThis.TokenUsageFmt) return globalThis.TokenUsageFmt;
     // Node tests may load this module before fmt.js sets the global.
     if (typeof require === "function") {
       try {
-        return require("./fmt.js").formatResetShort(iso, nowMs) || "";
+        return require("./fmt.js");
       } catch {
-        return "";
+        return null;
       }
     }
-    return "";
+    return null;
+  }
+
+  function shortReset(iso, nowMs) {
+    return fmtApi()?.formatResetShort?.(iso, nowMs) || "";
+  }
+
+  function whenReset(iso) {
+    return fmtApi()?.formatResetWhen?.(iso) || "";
   }
 
   function winPart(label, win, mode = "used", nowMs) {
@@ -152,12 +159,17 @@
 
   /** @param {{ windows?: any, billing?: any, balance?: any }} p */
   function providerTitle(p) {
+    const labels = [
+      ["cycle", p.billing?.resetsAtIso],
+      ["balance", p.balance?.resetsAtIso],
+      ["5h", p.windows?.five_hour?.resetsAtIso],
+      ["week", p.windows?.week?.resetsAtIso],
+      ["month", p.windows?.month?.resetsAtIso],
+    ];
     const resets = [];
-    if (p.billing?.resetsAtIso) resets.push(`cycle ${p.billing.resetsAtIso}`);
-    if (p.balance?.resetsAtIso) resets.push(`balance ${p.balance.resetsAtIso}`);
-    for (const id of ["five_hour", "week", "month"]) {
-      const iso = p.windows?.[id]?.resetsAtIso;
-      if (iso) resets.push(`${id} ${iso}`);
+    for (const [label, iso] of labels) {
+      const when = whenReset(iso);
+      if (when) resets.push(`${label} ${when}`);
     }
     return resets.join(" · ");
   }

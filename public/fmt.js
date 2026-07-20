@@ -31,13 +31,8 @@
     if (hours > 0 || days > 0) parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
     if (days === 0) parts.push(`${mins} minute${mins === 1 ? "" : "s"}`);
 
-    const when = then.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    return `Resets in ${parts.join(" ")} · ${when}`;
+    const when = formatResetWhen(iso);
+    return when ? `Resets in ${parts.join(" ")} · ${when}` : `Resets in ${parts.join(" ")}`;
   }
 
   /**
@@ -62,5 +57,22 @@
     return `${mins}m`;
   }
 
-  return { formatReset, formatResetShort };
+  /**
+   * Locale absolute reset time for tooltips (e.g. "Jul 23, 2:00 PM").
+   * @param {string | null | undefined} iso
+   * @returns {string}
+   */
+  function formatResetWhen(iso) {
+    if (!iso) return "";
+    const then = new Date(iso);
+    if (Number.isNaN(then.getTime())) return "";
+    return then.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  return { formatReset, formatResetShort, formatResetWhen };
 });

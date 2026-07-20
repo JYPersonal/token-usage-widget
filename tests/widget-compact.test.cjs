@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { providerLine } = require("../public/widget-compact.js");
+const { providerLine, providerTitle } = require("../public/widget-compact.js");
 
 test("codex compact line uses remaining % (matches Codex Analytics)", () => {
   const line = providerLine({
@@ -104,4 +104,17 @@ test("cursor compact appends cycle reset countdown", () => {
     { nowMs: now },
   );
   assert.equal(line, "cursor: total 23% first party 13% API 99% · 12d");
+});
+
+test("providerTitle uses human-readable dates, not raw ISO", () => {
+  const title = providerTitle({
+    billing: { resetsAtIso: "2026-08-04T09:27:11.000Z" },
+    windows: {
+      week: { resetsAtIso: "2026-07-26T17:16:26.000Z" },
+    },
+  });
+  assert.match(title, /^cycle /);
+  assert.match(title, / · week /);
+  assert.doesNotMatch(title, /T\d{2}:\d{2}:\d{2}/);
+  assert.doesNotMatch(title, /\.000Z/);
 });
