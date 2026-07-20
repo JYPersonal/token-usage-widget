@@ -152,6 +152,48 @@ test("OpenCode reads auth from a standard macOS Firefox profile", async (t) => {
   assert.ok(sqlitePaths[0].startsWith(tempDir));
 });
 
+test("OpenCode uses a standard Win32 Firefox profile through the provider seam", async (t) => {
+  const homeDir = await makeTempDir(t);
+  const profilesRoot = path.join(homeDir, "AppData", "Roaming", "Mozilla", "Firefox", "Profiles");
+  const cookieDb = path.join(profilesRoot, "fixture.default-release", "cookies.sqlite");
+  const tempDir = path.join(homeDir, "tmp");
+  await mkdir(path.dirname(cookieDb), { recursive: true });
+  await mkdir(tempDir, { recursive: true });
+  await writeFile(cookieDb, "fixture-win32-cookie");
+
+  const usage = await fetchOpenCodeUsage(
+    bareConfig({
+      opencode: {
+        dbPath: "",
+        caps: { five_hour: null, week: null, month: null },
+        go: { workspaceId: "wrk_FIXTURE", authCookie: null },
+      },
+    }),
+    {
+      platform: "win32",
+      homeDir,
+      env: {},
+      tempDir,
+      sqliteGet: async (copiedDb) => readFile(copiedDb, "utf8"),
+      fetchImpl: async (input, init) => {
+        assert.match(String(input), /\/workspace\/wrk_FIXTURE\/go$/);
+        assert.equal(new Headers(init?.headers).get("Cookie"), "auth=fixture-win32-cookie");
+        return new Response(
+          "rollingUsage:$R[0]={usagePercent:24,resetInSec:3600} " +
+            "weeklyUsage:$R[1]={usagePercent:40,resetInSec:7200} " +
+            "monthlyUsage:$R[2]={usagePercent:60,resetInSec:10800}",
+          { status: 200, headers: { "content-type": "text/html" } },
+        );
+      },
+    },
+  );
+
+  assert.equal(usage.windows.five_hour.status, "ok");
+  assert.equal(usage.windows.five_hour.usedPercent, 24);
+  assert.equal(usage.windows.week.usedPercent, 40);
+  assert.equal(usage.windows.month.usedPercent, 60);
+});
+
 test("OpenCode still reads Firefox cookies when the optional WAL cannot be copied", async () => {
   const profilesRoot = path.join("fixture", "Profiles");
   const dbPath = path.join(profilesRoot, "default-release", "cookies.sqlite");

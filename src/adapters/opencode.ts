@@ -204,6 +204,7 @@ export interface OpenCodeAdapterOptions extends OpenCodePathOptions {
   tempDir?: string;
   firefoxFs?: FirefoxFileSystem;
   sqliteGet?: (dbPath: string, sql: string) => Promise<string>;
+  fetchImpl?: typeof fetch;
 }
 
 const defaultFirefoxFs: FirefoxFileSystem = {
@@ -352,8 +353,11 @@ function normalizeApiWindow(raw: unknown): GoWindowScraped | undefined {
   return { usagePercent, resetInSec };
 }
 
-export async function fetchGoUsageApi(apiKey: string): Promise<GoUsageSnapshot | null> {
-  const res = await fetch(USAGE_API_URL, {
+export async function fetchGoUsageApi(
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<GoUsageSnapshot | null> {
+  const res = await fetchImpl(USAGE_API_URL, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
@@ -377,9 +381,10 @@ export async function fetchGoUsageApi(apiKey: string): Promise<GoUsageSnapshot |
 export async function scrapeGoDashboard(
   workspaceId: string,
   authCookie: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<GoUsageSnapshot | null> {
   const url = `${DASHBOARD_PREFIX}${encodeURIComponent(workspaceId)}/go`;
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html",
@@ -538,7 +543,7 @@ export async function fetchOpenCodeUsage(
   const apiKey = readApiKey(options);
   if (apiKey) {
     try {
-      const apiSnap = await fetchGoUsageApi(apiKey);
+      const apiSnap = await fetchGoUsageApi(apiKey, options.fetchImpl);
       if (apiSnap) {
         return {
           provider: "opencode",
@@ -557,7 +562,7 @@ export async function fetchOpenCodeUsage(
 
   if (workspaceId && authCookie) {
     try {
-      const snap = await scrapeGoDashboard(workspaceId, authCookie);
+      const snap = await scrapeGoDashboard(workspaceId, authCookie, options.fetchImpl);
       if (snap) {
         return {
           provider: "opencode",
