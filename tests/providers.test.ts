@@ -238,6 +238,41 @@ test("OpenCode removes Firefox temporary DB, WAL, and SHM companions", async (t)
   assert.deepEqual(await readdir(tempDir), []);
 });
 
+test("OpenCode surfaces cleanup failures without hiding a discovered cookie", async () => {
+  const profilesRoot = path.join("fixture", "Profiles");
+  const dbPath = path.join(profilesRoot, "default-release", "cookies.sqlite");
+  const temporaryFiles = new Set<string>();
+  const cleanupErrors: Error[] = [];
+
+  const cookie = await readFirefoxAuthCookie({
+    profilesRoot,
+    tempDir: "fixture-temp",
+    firefoxFs: {
+      exists: (filePath) =>
+        filePath === profilesRoot || filePath === dbPath || temporaryFiles.has(filePath),
+      list: async () => ["default-release"],
+      copy: async (_sourcePath, destinationPath) => {
+        temporaryFiles.add(destinationPath);
+      },
+      remove: async (filePath) => {
+        if (filePath.endsWith("-shm")) throw new Error("fixture remove failure");
+        temporaryFiles.delete(filePath);
+      },
+    },
+    sqliteGet: async (copiedDb) => {
+      temporaryFiles.add(`${copiedDb}-wal`);
+      temporaryFiles.add(`${copiedDb}-shm`);
+      return "cookie-despite-cleanup-failure";
+    },
+    onCleanupError: (error) => cleanupErrors.push(error),
+  });
+
+  assert.equal(cookie, "cookie-despite-cleanup-failure");
+  assert.equal(cleanupErrors.length, 1);
+  assert.match(cleanupErrors[0].message, /Firefox credential temporary file cleanup failed/);
+  assert.equal(temporaryFiles.size, 1);
+});
+
 test("OpenCode explicit cookies stay ahead of Firefox discovery", async (t) => {
   const homeDir = await makeTempDir(t);
   const cookieFile = path.join(homeDir, "explicit-cookie.txt");

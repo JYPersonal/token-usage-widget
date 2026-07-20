@@ -205,6 +205,7 @@ export interface OpenCodeAdapterOptions extends OpenCodePathOptions {
   firefoxFs?: FirefoxFileSystem;
   sqliteGet?: (dbPath: string, sql: string) => Promise<string>;
   fetchImpl?: typeof fetch;
+  onCleanupError?: (error: Error) => void;
 }
 
 const defaultFirefoxFs: FirefoxFileSystem = {
@@ -258,11 +259,34 @@ async function sqliteScalar(dbPath: string, sql: string): Promise<string> {
   return String(stdout).trim();
 }
 
-async function removeIfPresent(fs: FirefoxFileSystem, filePath: string): Promise<void> {
+function defaultCleanupErrorReporter(error: Error): void {
+  console.warn(error.message);
+}
+
+function reportCleanupError(reporter: (error: Error) => void, error: Error): void {
   try {
-    await fs.remove(filePath);
+    reporter(error);
   } catch {
-    // ignore missing temporary files
+    defaultCleanupErrorReporter(error);
+  }
+}
+
+async function cleanupTempFile(
+  fs: FirefoxFileSystem,
+  filePath: string,
+  reporter: (error: Error) => void,
+): Promise<void> {
+  try {
+    if (!fs.exists(filePath)) return;
+    await fs.remove(filePath);
+    if (fs.exists(filePath)) {
+      throw new Error("Temporary file remained after removal.");
+    }
+  } catch (cause) {
+    reportCleanupError(
+      reporter,
+      new Error("Firefox credential temporary file cleanup failed.", { cause }),
+    );
   }
 }
 
@@ -271,6 +295,7 @@ export async function readFirefoxAuthCookie(
 ): Promise<string | null> {
   const profilesRoot = options.profilesRoot ?? resolveFirefoxProfilesRoot(options);
   const fs = options.firefoxFs ?? defaultFirefoxFs;
+  const cleanupErrorReporter = options.onCleanupError ?? defaultCleanupErrorReporter;
   if (!fs.exists(profilesRoot)) return null;
 
   let dirs: string[];
@@ -301,9 +326,9 @@ export async function readFirefoxAuthCookie(
     } catch {
       // try next profile
     } finally {
-      await removeIfPresent(fs, tmp);
-      await removeIfPresent(fs, `${tmp}-wal`);
-      await removeIfPresent(fs, `${tmp}-shm`);
+      await cleanupTempFile(fs, tmp, cleanupErrorReporter);
+      await cleanupTempFile(fs, `${tmp}-wal`, cleanupErrorReporter);
+      await cleanupTempFile(fs, `${tmp}-shm`, cleanupErrorReporter);
     }
   }
   return null;
