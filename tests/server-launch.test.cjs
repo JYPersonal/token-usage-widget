@@ -23,7 +23,9 @@ const {
 function createFakeChild() {
   const child = new EventEmitter();
   child.killed = false;
+  child.killCalls = 0;
   child.kill = () => {
+    child.killCalls += 1;
     child.killed = true;
   };
   return child;
@@ -40,44 +42,89 @@ function createFakeFileSystem() {
   };
 }
 
-async function loadMainHarness(serverResult) {
+async function loadMainHarness(
+  serverResult,
+  {
+    platform = "win32",
+    primaryDisplay = { workArea: { x: 0, y: 0, width: 1920, height: 1080 } },
+    pointerDisplay = { workArea: { x: 1920, y: 24, width: 1440, height: 876 } },
+  } = {},
+) {
   const mainPath = require.resolve("../desktop/main.cjs");
   const app = new EventEmitter();
   app.isQuitting = false;
+  app.quitCalls = 0;
+  app.activationPolicies = [];
+  app.dock = { hideCalls: 0, hide: () => (app.dock.hideCalls += 1) };
   app.requestSingleInstanceLock = () => true;
   app.whenReady = () => Promise.resolve();
-  app.quit = () => {};
+  app.setActivationPolicy = (policy) => app.activationPolicies.push(policy);
+  app.quit = () => {
+    app.quitCalls += 1;
+    app.emit("before-quit");
+  };
 
   const ipcHandlers = new Map();
   const windows = [];
   const trays = [];
   const openedUrls = [];
   const healthCalls = [];
+  const legacyIcons = [];
+  const templateIcons = [];
+  let cursorPoint = { x: 2500, y: 400 };
+  let activePointerDisplay = pointerDisplay;
 
   class FakeBrowserWindow extends EventEmitter {
     constructor(options) {
       super();
       this.options = options;
       this.loadedUrl = null;
+      this.visible = false;
+      this.boundsCalls = [];
+      this.alwaysOnTopCalls = [];
+      this.workspaceCalls = [];
+      this.showCalls = 0;
+      this.showInactiveCalls = 0;
+      this.focusCalls = 0;
+      this.hideCalls = 0;
       windows.push(this);
     }
-    setAlwaysOnTop() {}
-    setVisibleOnAllWorkspaces() {}
+    setAlwaysOnTop(...args) {
+      this.alwaysOnTopCalls.push(args);
+    }
+    setVisibleOnAllWorkspaces(...args) {
+      this.workspaceCalls.push(args);
+    }
+    setBounds(bounds) {
+      this.boundsCalls.push(bounds);
+    }
     loadURL(url) {
       this.loadedUrl = url;
     }
-    showInactive() {}
-    show() {}
-    focus() {}
-    hide() {}
+    showInactive() {
+      this.showInactiveCalls += 1;
+      this.visible = true;
+    }
+    show() {
+      this.showCalls += 1;
+      this.visible = true;
+    }
+    focus() {
+      this.focusCalls += 1;
+    }
+    hide() {
+      this.hideCalls += 1;
+      this.visible = false;
+    }
     isVisible() {
-      return false;
+      return this.visible;
     }
   }
 
   class FakeTray extends EventEmitter {
-    constructor() {
+    constructor(icon) {
       super();
+      this.icon = icon;
       trays.push(this);
     }
     setToolTip() {}
@@ -86,15 +133,38 @@ async function loadMainHarness(serverResult) {
     }
   }
 
+  const screenApi = new EventEmitter();
+  screenApi.getPrimaryDisplay = () => primaryDisplay;
+  screenApi.getCursorScreenPoint = () => cursorPoint;
+  screenApi.getDisplayNearestPoint = () => activePointerDisplay;
+
   const electron = {
     app,
     BrowserWindow: FakeBrowserWindow,
     Tray: FakeTray,
     Menu: { buildFromTemplate: (template) => template },
-    nativeImage: { createFromDataURL: () => ({}) },
-    screen: {
-      getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    nativeImage: {
+      createFromDataURL: (dataUrl) => {
+        const image = { dataUrl, template: false };
+        legacyIcons.push(image);
+        return image;
+      },
+      createEmpty: () => {
+        const image = {
+          representations: [],
+          template: false,
+          addRepresentation(options) {
+            this.representations.push(options);
+          },
+          setTemplateImage(template) {
+            this.template = template;
+          },
+        };
+        templateIcons.push(image);
+        return image;
+      },
     },
+    screen: screenApi,
     shell: {
       openExternal: (url) => {
         openedUrls.push(url);
@@ -117,6 +187,7 @@ async function loadMainHarness(serverResult) {
   };
 
   const originalLoad = Module._load;
+  let mainModule;
   Module._load = function load(request, parent, isMain) {
     if (request === "electron") return electron;
     if (parent?.filename === mainPath && request === "./server-launch.cjs") return launchModule;
@@ -124,14 +195,32 @@ async function loadMainHarness(serverResult) {
   };
   delete require.cache[mainPath];
   try {
-    require(mainPath);
+    mainModule = require(mainPath);
   } finally {
     Module._load = originalLoad;
     delete require.cache[mainPath];
   }
+  assert.equal(typeof mainModule.runWidgetMain, "function");
+  mainModule.runWidgetMain({ electron, serverLaunch: launchModule, platform });
   await new Promise((resolve) => setImmediate(resolve));
 
-  return { app, ipcHandlers, windows, trays, openedUrls, healthCalls };
+  return {
+    app,
+    ipcHandlers,
+    windows,
+    trays,
+    openedUrls,
+    healthCalls,
+    legacyIcons,
+    templateIcons,
+    screen: screenApi,
+    setCursorPoint: (point) => {
+      cursorPoint = point;
+    },
+    setPointerDisplay: (display) => {
+      activePointerDisplay = display;
+    },
+  };
 }
 
 test("Darwin platform policy uses pointer display and native utility behavior", () => {
@@ -468,6 +557,214 @@ test("ensureUsageServer preserves Windows mode-mismatch replacement on the prefe
     { host: "127.0.0.1", port: 4321 },
     { host: "127.0.0.1", port: 4321 },
   ]);
+});
+
+test("Darwin main applies menu-bar utility policy and reanchors every restore path", async () => {
+  const harness = await loadMainHarness(
+    {
+      proc: null,
+      nodeBin: null,
+      logPath: "/tmp/server.log",
+      reused: true,
+      owned: false,
+      endpoint: {
+        host: "127.0.0.1",
+        port: 4321,
+        baseUrl: "http://127.0.0.1:4321",
+      },
+    },
+    { platform: "darwin" },
+  );
+  const window = harness.windows[0];
+  const boundsFor = (workArea) => ({
+    x: workArea.x + workArea.width - 336,
+    y: workArea.y + workArea.height - 188,
+    width: 320,
+    height: 172,
+  });
+
+  assert.deepEqual(harness.app.activationPolicies, ["accessory"]);
+  assert.equal(harness.app.dock.hideCalls, 1);
+  assert.deepEqual(window.options, {
+    x: 3024,
+    y: 712,
+    width: 320,
+    height: 172,
+    frame: false,
+    transparent: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    backgroundColor: "#04141c",
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "..", "desktop", "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  assert.deepEqual(window.alwaysOnTopCalls, [[true, "floating"]]);
+  assert.deepEqual(window.workspaceCalls, [[true, { visibleOnFullScreen: false }]]);
+  assert.equal(harness.legacyIcons.length, 0);
+  assert.equal(harness.templateIcons.length, 1);
+  assert.equal(harness.templateIcons[0].template, true);
+  assert.deepEqual(
+    harness.templateIcons[0].representations.map(({ scaleFactor }) => scaleFactor),
+    [1, 2],
+  );
+  assert.equal(harness.trays[0].icon, harness.templateIcons[0]);
+
+  const initialRestoreArea = { x: -1600, y: 25, width: 1600, height: 975 };
+  harness.setPointerDisplay({ workArea: initialRestoreArea });
+  window.emit("ready-to-show");
+  assert.deepEqual(window.boundsCalls.at(-1), boundsFor(initialRestoreArea));
+  assert.equal(window.showInactiveCalls, 1);
+
+  const showItem = harness.trays[0].menu.find((item) => item.label === "Show widget");
+  const menuRestoreArea = { x: 0, y: 24, width: 1512, height: 958 };
+  harness.setPointerDisplay({ workArea: menuRestoreArea });
+  showItem.click();
+  assert.deepEqual(window.boundsCalls.at(-1), boundsFor(menuRestoreArea));
+
+  harness.trays[0].emit("click");
+  assert.equal(window.isVisible(), false);
+  const trayRestoreArea = { x: 1512, y: 0, width: 1920, height: 1080 };
+  harness.setPointerDisplay({ workArea: trayRestoreArea });
+  harness.trays[0].emit("click");
+  assert.deepEqual(window.boundsCalls.at(-1), boundsFor(trayRestoreArea));
+
+  const secondInstanceArea = { x: 0, y: 38, width: 1728, height: 1079 };
+  harness.setPointerDisplay({ workArea: secondInstanceArea });
+  harness.app.emit("second-instance");
+  assert.deepEqual(window.boundsCalls.at(-1), boundsFor(secondInstanceArea));
+
+  for (const [eventName, workArea] of [
+    ["display-added", { x: 1728, y: 0, width: 2560, height: 1440 }],
+    ["display-removed", { x: 0, y: 24, width: 1440, height: 876 }],
+    ["display-metrics-changed", { x: -1920, y: 0, width: 1920, height: 1050 }],
+  ]) {
+    harness.setPointerDisplay({ workArea });
+    harness.screen.emit(eventName);
+    assert.deepEqual(window.boundsCalls.at(-1), boundsFor(workArea));
+  }
+});
+
+test("Darwin hide remains restorable while every exit route cleans up once", async () => {
+  function ownedServerResult(child) {
+    return {
+      proc: child,
+      nodeBin: "/usr/bin/node",
+      logPath: "/tmp/server.log",
+      reused: false,
+      owned: true,
+      endpoint: {
+        host: "127.0.0.1",
+        port: 6543,
+        baseUrl: "http://127.0.0.1:6543",
+      },
+    };
+  }
+
+  const hiddenChild = createFakeChild();
+  const hiddenHarness = await loadMainHarness(ownedServerResult(hiddenChild), { platform: "darwin" });
+  const hiddenWindow = hiddenHarness.windows[0];
+  hiddenWindow.emit("ready-to-show");
+  hiddenHarness.ipcHandlers.get("widget:close")();
+  assert.equal(hiddenWindow.isVisible(), false);
+  assert.equal(hiddenHarness.app.quitCalls, 0);
+  assert.equal(hiddenChild.killCalls, 0);
+  hiddenHarness.trays[0].emit("click");
+  assert.equal(hiddenWindow.isVisible(), true);
+  hiddenHarness.trays[0].menu.find((item) => item.label === "Quit").click();
+  hiddenHarness.app.emit("before-quit");
+  assert.equal(hiddenChild.killCalls, 1);
+
+  const exitRoutes = [
+    {
+      name: "custom x",
+      run: (harness) => harness.ipcHandlers.get("widget:quit")(),
+      expectedQuitCalls: 1,
+    },
+    {
+      name: "native close",
+      run: (harness) => {
+        let prevented = false;
+        harness.windows[0].emit("close", { preventDefault: () => (prevented = true) });
+        assert.equal(prevented, false);
+      },
+      expectedQuitCalls: 1,
+    },
+    {
+      name: "menu Quit",
+      run: (harness) => harness.trays[0].menu.find((item) => item.label === "Quit").click(),
+      expectedQuitCalls: 1,
+    },
+    {
+      name: "Command-Q",
+      run: (harness) => harness.app.emit("before-quit"),
+      expectedQuitCalls: 0,
+    },
+  ];
+
+  for (const route of exitRoutes) {
+    const child = createFakeChild();
+    const harness = await loadMainHarness(ownedServerResult(child), { platform: "darwin" });
+    route.run(harness);
+    harness.app.emit("before-quit");
+    assert.equal(harness.app.quitCalls, route.expectedQuitCalls, route.name);
+    assert.equal(child.killCalls, 1, route.name);
+  }
+});
+
+test("Win32 main preserves tray, primary placement, Spaces, and native close-to-hide", async () => {
+  const child = createFakeChild();
+  const harness = await loadMainHarness(
+    {
+      proc: child,
+      nodeBin: "C:\\nodejs\\node.exe",
+      logPath: "C:\\temp\\server.log",
+      reused: false,
+      owned: true,
+      endpoint: {
+        host: "127.0.0.1",
+        port: 4321,
+        baseUrl: "http://127.0.0.1:4321",
+      },
+    },
+    { platform: "win32" },
+  );
+  const window = harness.windows[0];
+
+  assert.deepEqual(harness.app.activationPolicies, []);
+  assert.equal(harness.app.dock.hideCalls, 0);
+  assert.deepEqual(
+    { x: window.options.x, y: window.options.y, width: window.options.width, height: window.options.height },
+    { x: 1584, y: 892, width: 320, height: 172 },
+  );
+  assert.deepEqual(window.alwaysOnTopCalls, [[true, "screen-saver"]]);
+  assert.deepEqual(window.workspaceCalls, [[true, { visibleOnFullScreen: true }]]);
+  assert.equal(harness.legacyIcons.length, 1);
+  assert.equal(harness.templateIcons.length, 0);
+  assert.equal(harness.trays[0].icon, harness.legacyIcons[0]);
+
+  window.emit("ready-to-show");
+  let prevented = false;
+  window.emit("close", { preventDefault: () => (prevented = true) });
+  assert.equal(prevented, true);
+  assert.equal(window.isVisible(), false);
+  assert.equal(harness.app.quitCalls, 0);
+  assert.equal(child.killCalls, 0);
+
+  harness.setPointerDisplay({ workArea: { x: 1920, y: 0, width: 2560, height: 1440 } });
+  harness.trays[0].emit("click");
+  assert.deepEqual(window.boundsCalls.at(-1), { x: 1584, y: 892, width: 320, height: 172 });
+  harness.ipcHandlers.get("widget:quit")();
+  assert.equal(harness.app.quitCalls, 1);
+  assert.equal(child.killCalls, 1);
 });
 
 test("desktop main ignores second-instance until endpoint startup is ready", async () => {
