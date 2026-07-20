@@ -13,6 +13,11 @@ const {
   ensureUsageServer,
   healthCheck,
 } = require("../desktop/server-launch.cjs");
+const {
+  getPlatformPolicy,
+  selectDisplay,
+  calculateCornerBounds,
+} = require("../desktop/platform-policy.cjs");
 
 function createFakeChild() {
   const child = new EventEmitter();
@@ -127,6 +132,76 @@ async function loadMainHarness(serverResult) {
 
   return { app, ipcHandlers, windows, trays, openedUrls, healthCalls };
 }
+
+test("Darwin platform policy uses pointer display and native utility behavior", () => {
+  const cursorPoint = { x: 2500, y: 400 };
+  const pointerDisplay = { workArea: { x: 1920, y: 24, width: 1440, height: 876 } };
+  let nearestPoint = null;
+  const policy = getPlatformPolicy("darwin");
+  const display = selectDisplay(policy, {
+    getCursorScreenPoint: () => cursorPoint,
+    getDisplayNearestPoint: (point) => {
+      nearestPoint = point;
+      return pointerDisplay;
+    },
+    getPrimaryDisplay: () => assert.fail("Darwin must select the display containing the pointer"),
+  });
+
+  assert.deepEqual(nearestPoint, cursorPoint);
+  assert.equal(display, pointerDisplay);
+  assert.deepEqual(calculateCornerBounds(display.workArea, policy), {
+    x: 3024,
+    y: 712,
+    width: 320,
+    height: 172,
+  });
+  assert.deepEqual(policy, {
+    platform: "darwin",
+    displaySelection: "cursor",
+    width: 320,
+    height: 172,
+    margin: 16,
+    windowLevel: "floating",
+    visibleOnAllWorkspaces: true,
+    visibleOnFullScreen: false,
+    nativeClose: "quit",
+    hideDock: true,
+    activationPolicy: "accessory",
+    trayIcon: "template",
+  });
+});
+
+test("Win32 platform policy preserves primary-display 320x172 widget behavior", () => {
+  const primaryDisplay = { workArea: { x: 0, y: 0, width: 1920, height: 1080 } };
+  const policy = getPlatformPolicy("win32");
+  const display = selectDisplay(policy, {
+    getCursorScreenPoint: () => assert.fail("Win32 must retain primary-display placement"),
+    getDisplayNearestPoint: () => assert.fail("Win32 must retain primary-display placement"),
+    getPrimaryDisplay: () => primaryDisplay,
+  });
+
+  assert.equal(display, primaryDisplay);
+  assert.deepEqual(calculateCornerBounds(display.workArea, policy), {
+    x: 1584,
+    y: 892,
+    width: 320,
+    height: 172,
+  });
+  assert.deepEqual(policy, {
+    platform: "win32",
+    displaySelection: "primary",
+    width: 320,
+    height: 172,
+    margin: 16,
+    windowLevel: "screen-saver",
+    visibleOnAllWorkspaces: true,
+    visibleOnFullScreen: true,
+    nativeClose: "hide",
+    hideDock: false,
+    activationPolicy: null,
+    trayIcon: "legacy",
+  });
+});
 
 test("resolveNodeBinary never returns electron.exe", () => {
   const bin = resolveNodeBinary(process.env);
