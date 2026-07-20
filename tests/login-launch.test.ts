@@ -215,9 +215,12 @@ test("install writes a temp file then atomically renames, with RunAtLoad=true an
   const xml = state.files.get(plistPath(seams))!.toString("utf8");
   assert.match(xml, /<key>RunAtLoad<\/key>\s*<true\/>/);
   assert.match(xml, /<key>KeepAlive<\/key>\s*<false\/>/);
-  assert.match(xml, new RegExp(`<string>${seams.nodeBin}</string>`));
-  assert.match(xml, new RegExp(`<string>${seams.launcher}</string>`));
-  assert.match(xml, new RegExp(`<string>${seams.checkout}</string>`));
+  // Escape backslashes so the assertion holds on hosts where the seam paths
+  // carry Windows separators (backslash is a RegExp metacharacter).
+  const reString = (s: string) => s.replace(/\\/g, "\\\\");
+  assert.match(xml, new RegExp(`<string>${reString(seams.nodeBin)}</string>`));
+  assert.match(xml, new RegExp(`<string>${reString(seams.launcher)}</string>`));
+  assert.match(xml, new RegExp(`<string>${reString(seams.checkout)}</string>`));
   assert.match(xml, /<key>WorkingDirectory<\/key>\s*<string>\/workspace\/token-usage-dashboard<\/string>/);
   // bootstraps gui/<uid>
   assert.deepEqual(exec.calls.map((c) => ({ cmd: c.cmd, args: c.args })), [

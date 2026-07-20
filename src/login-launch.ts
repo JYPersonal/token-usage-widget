@@ -9,6 +9,7 @@
  * or `launchctl`.
  */
 import path from "node:path";
+import { posix as posixPath } from "node:path";
 
 export const MANAGED_LABEL = "com.token-usage-dashboard.widget";
 
@@ -72,8 +73,10 @@ function xmlEscape(s: string): string {
 
 export function buildPlistXml(inputs: PlistInputs): string {
   const { nodeBin, launcher, checkout, logDir, label } = inputs;
-  const stdoutLog = path.join(logDir, "widget.out.log");
-  const stderrLog = path.join(logDir, "widget.err.log");
+  // Log paths inside the plist are consumed by macOS launchd, so they are
+  // always POSIX regardless of the host that generated the plist.
+  const stdoutLog = posixPath.join(logDir, "widget.out.log");
+  const stderrLog = posixPath.join(logDir, "widget.err.log");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -106,7 +109,10 @@ function plistPathFor(seams: LoginLaunchSeams): string {
 }
 
 function assertAbsolute(p: string, label: string): void {
-  if (!path.isAbsolute(p)) {
+  // Accept both POSIX-absolute ("/usr/...") and Win32-absolute ("\usr\...",
+  // "C:\...") inputs so the same validation holds on every host without
+  // weakening the absolute-path requirement.
+  if (!path.posix.isAbsolute(p) && !path.win32.isAbsolute(p)) {
     throw new Error(`Expected absolute ${label}, got: ${p}`);
   }
 }

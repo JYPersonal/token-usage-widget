@@ -18,7 +18,11 @@ function resolveLaunchPlan({
   env = process.env,
   fs: fileSystem = fs,
 } = {}) {
-  const checkoutPath = path.resolve(checkout);
+  // Pass absolute checkouts through unchanged. path.resolve on a driveless
+  // absolute path (e.g. "/workspace/x") prepends the host's drive prefix on
+  // Windows (C:\workspace\x), corrupting simulated POSIX checkouts and
+  // breaking the fs lookup against test fixtures.
+  const checkoutPath = path.isAbsolute(checkout) ? checkout : path.resolve(checkout);
   requirePath(
     fileSystem,
     path.join(checkoutPath, "package.json"),
@@ -62,7 +66,7 @@ function resolveLaunchPlan({
   if (!electronRelativePath) {
     throw new Error(`Local Electron path metadata is empty at ${electronPathFile}`);
   }
-  const electronExecutable = path.resolve(electronRoot, "dist", electronRelativePath);
+  const electronExecutable = path.join(electronRoot, "dist", electronRelativePath);
   requirePath(fileSystem, electronExecutable, "Local Electron executable", installElectron);
 
   const launchEnv = { ...env, NODE_BINARY: nodeExecPath };
