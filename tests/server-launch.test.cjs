@@ -173,6 +173,40 @@ test("buildEndpoint derives one base URL from the returned host and port", () =>
   });
 });
 
+test("evidence runner targets the returned endpoint and resolves platform Electron binaries", async () => {
+  const { evidenceTarget, resolveInstalledElectron } = await import("../scripts/e2e-evidence.mjs");
+
+  assert.deepEqual(
+    evidenceTarget({ host: "127.0.0.1", port: 6543, baseUrl: "http://127.0.0.1:6543" }),
+    {
+      host: "127.0.0.1",
+      port: 6543,
+      healthUrl: "http://127.0.0.1:6543/api/health",
+      usageUrl: "http://127.0.0.1:6543/api/usage",
+      widgetUrl: "http://127.0.0.1:6543/widget.html",
+    },
+  );
+
+  const cases = [
+    { platform: "win32", root: "C:\\repo", expected: "C:\\repo\\node_modules\\electron\\dist\\electron.exe" },
+    { platform: "darwin", root: "/repo", expected: "/repo/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" },
+    { platform: "linux", root: "/repo", expected: "/repo/node_modules/electron/dist/electron" },
+  ];
+  for (const { platform, root, expected } of cases) {
+    assert.equal(
+      resolveInstalledElectron({
+        platform,
+        root,
+        loadElectron: () => {
+          throw new Error("package path unavailable");
+        },
+        existsSync: (candidate) => candidate === expected,
+      }),
+      expected,
+    );
+  }
+});
+
 test("allocateFreeLoopbackPort asks the OS for an ephemeral loopback port", async () => {
   const server = new EventEmitter();
   server.unref = () => {};
