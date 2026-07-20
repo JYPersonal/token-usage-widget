@@ -179,7 +179,14 @@ function assertNotElectronBinary(nodeBin) {
 }
 
 /**
- * @returns {Promise<{ proc: import('node:child_process').ChildProcess, nodeBin: string, logPath: string }>}
+ * @returns {Promise<{
+ *   proc: import('node:child_process').ChildProcess | null,
+ *   nodeBin: string | null,
+ *   logPath: string | null,
+ *   reused: boolean,
+ *   owned: boolean,
+ *   endpoint: { host: string, port: number, baseUrl: string }
+ * }>}
  */
 async function ensureUsageServer(options = {}) {
   const host = options.host || DEFAULT_HOST;
