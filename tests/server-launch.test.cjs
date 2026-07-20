@@ -8,6 +8,7 @@ const path = require("node:path");
 const {
   resolveNodeBinary,
   assertNotElectronBinary,
+  buildEndpoint,
   allocateFreeLoopbackPort,
   ensureUsageServer,
   healthCheck,
@@ -164,6 +165,14 @@ test("assertNotElectronBinary throws for electron.exe", () => {
   assert.doesNotThrow(() => assertNotElectronBinary("C:\\\\nvm4w\\\\nodejs\\\\node.exe"));
 });
 
+test("buildEndpoint derives one base URL from the returned host and port", () => {
+  assert.deepEqual(buildEndpoint("127.0.0.1", 6543), {
+    host: "127.0.0.1",
+    port: 6543,
+    baseUrl: "http://127.0.0.1:6543",
+  });
+});
+
 test("allocateFreeLoopbackPort asks the OS for an ephemeral loopback port", async () => {
   const server = new EventEmitter();
   server.unref = () => {};
@@ -187,6 +196,7 @@ test("ensureUsageServer reuses a matching healthy server and returns its endpoin
     platform: "darwin",
     host: "127.0.0.1",
     port: 5432,
+    logPath: "/tmp/reused-server.log",
     env: { USAGE_FIXTURE: "1" },
     fetchHealth: async () => ({ ok: true, fixture: true }),
   });
@@ -194,7 +204,7 @@ test("ensureUsageServer reuses a matching healthy server and returns its endpoin
   assert.deepEqual(result, {
     proc: null,
     nodeBin: null,
-    logPath: result.logPath,
+    logPath: "/tmp/reused-server.log",
     reused: true,
     owned: false,
     endpoint: {
@@ -378,6 +388,33 @@ test("desktop main never stops a child it does not own", async () => {
 
   harness.app.emit("before-quit");
   assert.equal(child.killed, false);
+});
+
+test("ensureUsageServer stops its spawned child when startup readiness fails", async () => {
+  const child = createFakeChild();
+  let healthChecks = 0;
+
+  await assert.rejects(
+    ensureUsageServer({
+      platform: "darwin",
+      host: "127.0.0.1",
+      port: 4321,
+      maxAttempts: 1,
+      fetchHealth: async () => {
+        healthChecks += 1;
+        return null;
+      },
+      isPortAvailable: async () => true,
+      resolveNodeBinary: () => "/usr/bin/node",
+      sleep: async () => {},
+      fs: createFakeFileSystem(),
+      spawn: () => child,
+    }),
+    /did not become ready on http:\/\/127\.0\.0\.1:4321/,
+  );
+
+  assert.equal(healthChecks, 2);
+  assert.equal(child.killed, true);
 });
 
 test("ensureUsageServer starts fixture server with real node (not electron)", async () => {
