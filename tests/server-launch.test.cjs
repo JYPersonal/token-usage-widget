@@ -3,6 +3,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
 const Module = require("node:module");
 const path = require("node:path");
 const {
@@ -201,6 +202,20 @@ test("Win32 platform policy preserves primary-display 320x172 widget behavior", 
     activationPolicy: null,
     trayIcon: "legacy",
   });
+});
+
+test("macOS tray template assets provide 1x and 2x PNG representations", () => {
+  const assets = [
+    { name: "trayTemplate.png", width: 16, height: 16 },
+    { name: "trayTemplate@2x.png", width: 32, height: 32 },
+  ];
+
+  for (const asset of assets) {
+    const bytes = fs.readFileSync(path.join(__dirname, "..", "desktop", "assets", asset.name));
+    assert.equal(bytes.subarray(1, 4).toString("ascii"), "PNG");
+    assert.equal(bytes.readUInt32BE(16), asset.width);
+    assert.equal(bytes.readUInt32BE(20), asset.height);
+  }
 });
 
 test("resolveNodeBinary never returns electron.exe", () => {
