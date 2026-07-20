@@ -1,7 +1,15 @@
 {
   "name": "token-usage-dashboard",
   "version": "1.0.0",
-  "description": "Local dashboard + Windows corner widget for multi-harness token usage (Codex, OpenCode, Cursor, Claude, OpenRouter, Kimi, Z.AI, Grok).",
+  "description": "Local Windows corner widget + dashboard for Codex, Cursor, and other AI harness quotas. MIT, localhost-only.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JYPersonal/token-usage-widget.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JYPersonal/token-usage-widget/issues"
+  },
+  "homepage": "https://github.com/JYPersonal/token-usage-widget#readme",
   "type": "module",
   "main": "desktop/main.cjs",
   "scripts": {
