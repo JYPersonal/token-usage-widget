@@ -174,7 +174,7 @@ test("buildEndpoint derives one base URL from the returned host and port", () =>
 });
 
 test("evidence runner targets the returned endpoint and resolves platform Electron binaries", async () => {
-  const { evidenceTarget, resolveInstalledElectron } = await import("../scripts/e2e-evidence.mjs");
+  const { evidenceElectronEnv, evidenceTarget, resolveInstalledElectron } = await import("../scripts/e2e-evidence.mjs");
 
   assert.deepEqual(
     evidenceTarget({ host: "127.0.0.1", port: 6543, baseUrl: "http://127.0.0.1:6543" }),
@@ -185,6 +185,11 @@ test("evidence runner targets the returned endpoint and resolves platform Electr
       usageUrl: "http://127.0.0.1:6543/api/usage",
       widgetUrl: "http://127.0.0.1:6543/widget.html",
     },
+  );
+
+  assert.deepEqual(
+    evidenceElectronEnv({ host: "127.0.0.9", port: 6543 }, { KEEP: "yes", PORT: "4321" }),
+    { KEEP: "yes", PORT: "6543", USAGE_HOST: "127.0.0.9" },
   );
 
   const cases = [

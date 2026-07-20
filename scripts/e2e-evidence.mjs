@@ -66,6 +66,14 @@ export function evidenceTarget(endpoint) {
   };
 }
 
+export function evidenceElectronEnv(endpoint, baseEnv = process.env) {
+  return {
+    ...baseEnv,
+    USAGE_HOST: endpoint.host,
+    PORT: String(endpoint.port),
+  };
+}
+
 export function resolveInstalledElectron(options = {}) {
   const root = options.root || ROOT;
   const platform = options.platform || process.platform;
@@ -191,8 +199,7 @@ async function main() {
     widgetProc = spawn(electron, [ROOT, "--fixture"], {
       cwd: ROOT,
       env: {
-        ...process.env,
-        PORT: String(target.port),
+        ...evidenceElectronEnv(serverHandle.endpoint),
         USAGE_FIXTURE: "1",
         USAGE_FIXTURE_ALL: "1",
         NODE_BINARY: resolveNodeBinary(process.env),
