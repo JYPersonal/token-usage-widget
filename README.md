@@ -12,7 +12,7 @@ Windows corner widget (always-on-top):
 
 ![Corner widget showing Codex and Cursor usage](docs/widget-demo.png)
 
-A macOS screenshot is **not** available for this release — the maintainer has no Mac, so real interactive Mac behavior is unverified. The compact UI is identical on macOS because both platforms share `public/widget.html`, `public/widget.css`, `public/widget.js`, and `public/widget-compact.js`, plus the 320 × 172 / 16 px margin geometry from `desktop/platform-policy.cjs`. See [macOS widget](#macos-widget) and the [evidence index](docs/macos-widget/evidence-index.md).
+A macOS screenshot is **not** available for this release — the maintainer has no Mac, so real interactive Mac behavior is unverified. The compact UI is identical on macOS because both platforms share `public/widget.html`, `public/widget.css`, `public/widget.js`, and `public/widget-compact.js`, plus the 320 × 172 / 16 px margin geometry from `desktop/platform-policy.cjs`. See [macOS widget](#macos) and the [evidence index](docs/macos-widget/evidence-index.md).
 
 Browser dashboard at `http://127.0.0.1:4321`:
 
