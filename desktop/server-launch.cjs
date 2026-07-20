@@ -129,39 +129,50 @@ function freePort(port) {
 }
 
 /** Electron's process.execPath is electron.exe — never use it to run the API server. */
-function resolveNodeBinary(env = process.env) {
-  const candidates = [
-    env.npm_node_execpath,
-    env.NODE_BINARY,
-    env.NVM_SYMLINK && path.join(env.NVM_SYMLINK, "node.exe"),
-    env.NVM_HOME && path.join(env.NVM_HOME, "nodejs", "node.exe"),
-    "C:\\nvm4w\\nodejs\\node.exe",
-  ].filter(Boolean);
+function resolveNodeBinary(env = process.env, options = {}) {
+  const platform = options.platform || process.platform;
+  const fileSystem = options.fs || fs;
+  const execFile = options.execFileSync || execFileSync;
+  const processExecPath = options.execPath || process.execPath;
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  const candidates = [env.npm_node_execpath, env.NODE_BINARY];
 
-  for (const c of candidates) {
+  if (platform === "win32") {
+    candidates.push(
+      env.NVM_SYMLINK && pathApi.join(env.NVM_SYMLINK, "node.exe"),
+      env.NVM_HOME && pathApi.join(env.NVM_HOME, "nodejs", "node.exe"),
+      "C:\\nvm4w\\nodejs\\node.exe",
+    );
+  } else if (["node", "node.exe"].includes(pathApi.basename(processExecPath).toLowerCase())) {
+    candidates.push(processExecPath);
+  }
+
+  for (const candidate of candidates.filter(Boolean)) {
     try {
-      if (c && fs.existsSync(c)) return c;
+      if (fileSystem.existsSync(candidate)) return candidate;
     } catch {
       // continue
     }
   }
 
-  try {
-    const out = execFileSync("where.exe", ["node"], { encoding: "utf8", windowsHide: true });
-    const first = out
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => l.toLowerCase().endsWith("node.exe"));
-    if (first && fs.existsSync(first)) return first;
-  } catch {
-    // fall through
+  if (platform === "win32") {
+    try {
+      const out = execFile("where.exe", ["node"], { encoding: "utf8", windowsHide: true });
+      const first = out
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.toLowerCase().endsWith("node.exe"));
+      if (first && fileSystem.existsSync(first)) return first;
+    } catch {
+      // fall through
+    }
   }
 
   return "node";
 }
 
 function assertNotElectronBinary(nodeBin) {
-  const base = path.basename(String(nodeBin)).toLowerCase();
+  const base = String(nodeBin).split(/[\\/]/).pop().toLowerCase();
   if (base === "electron.exe" || base === "electron") {
     throw new Error(`Refusing to launch usage server with Electron binary: ${nodeBin}`);
   }
@@ -218,7 +229,12 @@ async function ensureUsageServer(options = {}) {
   }
   const endpoint = buildEndpoint(host, launchPort);
 
-  const nodeBin = resolveNodeBinaryFn(mergedEnv);
+  const nodeBin = resolveNodeBinaryFn(mergedEnv, {
+    platform,
+    fs: fileSystem,
+    execFileSync: options.execFileSync,
+    execPath: options.execPath,
+  });
   assertNotElectronBinary(nodeBin);
 
   const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");

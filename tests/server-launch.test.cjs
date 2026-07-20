@@ -12,6 +12,26 @@ const {
   healthCheck,
 } = require("../desktop/server-launch.cjs");
 
+function createFakeChild() {
+  const child = new EventEmitter();
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+  };
+  return child;
+}
+
+function createFakeFileSystem() {
+  return {
+    existsSync: () => true,
+    writeFileSync: () => {},
+    openSync: () => 9,
+    closeSync: () => {},
+    appendFileSync: () => {},
+    readFileSync: () => "",
+  };
+}
+
 test("resolveNodeBinary never returns electron.exe", () => {
   const bin = resolveNodeBinary(process.env);
   const base = path.basename(bin).toLowerCase();
@@ -28,6 +48,20 @@ test("resolveNodeBinary prefers NODE_BINARY when it exists", () => {
   } else {
     assert.ok(node === "node" || node.toLowerCase().includes("node"));
   }
+});
+
+test("resolveNodeBinary uses injected Darwin filesystem and process inputs", () => {
+  const nodeBin = resolveNodeBinary(
+    { NODE_BINARY: "/opt/homebrew/bin/node" },
+    {
+      platform: "darwin",
+      fs: { existsSync: (candidate) => candidate === "/opt/homebrew/bin/node" },
+      execFileSync: () => assert.fail("Darwin must not invoke where.exe"),
+      execPath: "/Applications/Electron.app/Contents/MacOS/Electron",
+    },
+  );
+
+  assert.equal(nodeBin, "/opt/homebrew/bin/node");
 });
 
 test("assertNotElectronBinary throws for electron.exe", () => {
@@ -77,11 +111,7 @@ test("ensureUsageServer reuses a matching healthy server and returns its endpoin
 });
 
 test("ensureUsageServer preserves an unknown Darwin listener and starts on a free port", async () => {
-  const child = new EventEmitter();
-  child.killed = false;
-  child.kill = () => {
-    child.killed = true;
-  };
+  const child = createFakeChild();
   const healthCalls = [];
   let spawned;
 
@@ -101,14 +131,7 @@ test("ensureUsageServer preserves an unknown Darwin listener and starts on a fre
     freePort: () => assert.fail("Darwin must not kill the preferred-port listener"),
     resolveNodeBinary: () => "/usr/bin/node",
     sleep: async () => {},
-    fs: {
-      existsSync: () => true,
-      writeFileSync: () => {},
-      openSync: () => 9,
-      closeSync: () => {},
-      appendFileSync: () => {},
-      readFileSync: () => "",
-    },
+    fs: createFakeFileSystem(),
     spawn: (nodeBin, args, options) => {
       spawned = { nodeBin, args, options };
       return child;
@@ -127,6 +150,89 @@ test("ensureUsageServer preserves an unknown Darwin listener and starts on a fre
   assert.deepEqual(healthCalls, [
     { host: "127.0.0.1", port: 4321 },
     { host: "127.0.0.1", port: 6543 },
+  ]);
+});
+
+test("ensureUsageServer preserves a fixture-mismatched Darwin listener", async () => {
+  const child = createFakeChild();
+  const healthCalls = [];
+  const freedPorts = [];
+
+  const result = await ensureUsageServer({
+    platform: "darwin",
+    host: "127.0.0.1",
+    port: 4321,
+    env: { USAGE_FIXTURE: "1" },
+    maxAttempts: 1,
+    fetchHealth: async (host, port) => {
+      healthCalls.push({ host, port });
+      return healthCalls.length === 1
+        ? { ok: true, fixture: false }
+        : { ok: true, fixture: true };
+    },
+    isPortAvailable: () => assert.fail("a healthy mismatch is already known to occupy the port"),
+    allocateFreeLoopbackPort: async () => 6544,
+    freePort: (port) => freedPorts.push(port),
+    resolveNodeBinary: () => "/usr/bin/node",
+    sleep: async () => {},
+    fs: createFakeFileSystem(),
+    spawn: () => child,
+  });
+
+  assert.deepEqual(freedPorts, []);
+  assert.equal(result.owned, true);
+  assert.deepEqual(result.endpoint, {
+    host: "127.0.0.1",
+    port: 6544,
+    baseUrl: "http://127.0.0.1:6544",
+  });
+  assert.deepEqual(healthCalls, [
+    { host: "127.0.0.1", port: 4321 },
+    { host: "127.0.0.1", port: 6544 },
+  ]);
+});
+
+test("ensureUsageServer preserves Windows mode-mismatch replacement on the preferred port", async () => {
+  const child = createFakeChild();
+  const healthCalls = [];
+  const freedPorts = [];
+  let spawnedPort;
+
+  const result = await ensureUsageServer({
+    platform: "win32",
+    host: "127.0.0.1",
+    port: 4321,
+    env: { USAGE_FIXTURE: "1" },
+    maxAttempts: 1,
+    fetchHealth: async (host, port) => {
+      healthCalls.push({ host, port });
+      return healthCalls.length === 1
+        ? { ok: true, fixture: false }
+        : { ok: true, fixture: true };
+    },
+    isPortAvailable: () => assert.fail("Windows mode mismatch must retain its existing replacement path"),
+    allocateFreeLoopbackPort: () => assert.fail("Windows must retain the configured port"),
+    freePort: (port) => freedPorts.push(port),
+    resolveNodeBinary: () => "C:\\nvm4w\\nodejs\\node.exe",
+    sleep: async () => {},
+    fs: createFakeFileSystem(),
+    spawn: (_nodeBin, _args, options) => {
+      spawnedPort = options.env.PORT;
+      return child;
+    },
+  });
+
+  assert.deepEqual(freedPorts, [4321]);
+  assert.equal(spawnedPort, "4321");
+  assert.equal(result.owned, true);
+  assert.deepEqual(result.endpoint, {
+    host: "127.0.0.1",
+    port: 4321,
+    baseUrl: "http://127.0.0.1:4321",
+  });
+  assert.deepEqual(healthCalls, [
+    { host: "127.0.0.1", port: 4321 },
+    { host: "127.0.0.1", port: 4321 },
   ]);
 });
 
