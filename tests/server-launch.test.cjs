@@ -341,6 +341,34 @@ test("ensureUsageServer preserves Windows mode-mismatch replacement on the prefe
   ]);
 });
 
+test("desktop main ignores second-instance until endpoint startup is ready", async () => {
+  let resolveServer;
+  const serverResult = new Promise((resolve) => {
+    resolveServer = resolve;
+  });
+  const harness = await loadMainHarness(serverResult);
+
+  assert.doesNotThrow(() => harness.app.emit("second-instance"));
+  assert.equal(harness.windows.length, 0);
+
+  resolveServer({
+    proc: null,
+    nodeBin: null,
+    logPath: "/tmp/server.log",
+    reused: true,
+    owned: false,
+    endpoint: {
+      host: "127.0.0.1",
+      port: 4321,
+      baseUrl: "http://127.0.0.1:4321",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.windows.length, 1);
+  assert.equal(harness.windows[0].loadedUrl, "http://127.0.0.1:4321/widget.html");
+});
+
 test("desktop main uses one returned endpoint and stops its owned child on quit", async () => {
   const child = createFakeChild();
   const harness = await loadMainHarness({

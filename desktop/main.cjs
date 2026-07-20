@@ -185,6 +185,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    if (!serverEndpoint) return;
     if (!win) createWindow();
     win?.show();
     win?.focus();
