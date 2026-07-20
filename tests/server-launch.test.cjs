@@ -2,10 +2,12 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const path = require("node:path");
 const {
   resolveNodeBinary,
   assertNotElectronBinary,
+  allocateFreeLoopbackPort,
   ensureUsageServer,
   healthCheck,
 } = require("../desktop/server-launch.cjs");
@@ -31,6 +33,24 @@ test("resolveNodeBinary prefers NODE_BINARY when it exists", () => {
 test("assertNotElectronBinary throws for electron.exe", () => {
   assert.throws(() => assertNotElectronBinary("C:\\\\fake\\\\electron.exe"), /Refusing/);
   assert.doesNotThrow(() => assertNotElectronBinary("C:\\\\nvm4w\\\\nodejs\\\\node.exe"));
+});
+
+test("allocateFreeLoopbackPort asks the OS for an ephemeral loopback port", async () => {
+  const server = new EventEmitter();
+  server.unref = () => {};
+  server.listen = (port, host, callback) => {
+    assert.equal(port, 0);
+    assert.equal(host, "127.0.0.1");
+    queueMicrotask(callback);
+  };
+  server.address = () => ({ address: "127.0.0.1", family: "IPv4", port: 6543 });
+  server.close = (callback) => callback();
+
+  const port = await allocateFreeLoopbackPort("127.0.0.1", {
+    createServer: () => server,
+  });
+
+  assert.equal(port, 6543);
 });
 
 test("ensureUsageServer reuses a matching healthy server and returns its endpoint", async () => {

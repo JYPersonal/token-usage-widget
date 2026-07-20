@@ -8,6 +8,7 @@
 const { spawn, execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
+const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -24,6 +25,28 @@ function buildEndpoint(host, port) {
     port: normalizedPort,
     baseUrl: `http://${normalizedHost}:${normalizedPort}`,
   };
+}
+
+function allocateFreeLoopbackPort(host = DEFAULT_HOST, network = net) {
+  return new Promise((resolve, reject) => {
+    const server = network.createServer();
+    const onError = (err) => reject(err);
+    server.once("error", onError);
+    server.unref();
+    server.listen(0, host, () => {
+      server.removeListener("error", onError);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error(`Unable to allocate a free loopback port on ${host}`));
+        return;
+      }
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve(address.port);
+      });
+    });
+  });
 }
 
 function healthCheck(host = DEFAULT_HOST, port = DEFAULT_PORT, timeoutMs = 2000) {
@@ -212,6 +235,7 @@ module.exports = {
   DEFAULT_PORT,
   SERVER_LOG,
   buildEndpoint,
+  allocateFreeLoopbackPort,
   healthCheck,
   fetchHealth,
   freePort,
