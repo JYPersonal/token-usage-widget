@@ -26,11 +26,12 @@ test("workflow file exists at .github/workflows/verify.yml", () => {
   readWorkflow();
 });
 
-test("triggers on pull requests and pushes to master", () => {
+test("triggers on pull requests and pushes to master and harness/** branches", () => {
   const y = readWorkflow();
   assert.match(y, /\bon:\s*\n\s*pull_request:/, "on: pull_request trigger missing");
   assert.match(y, /\n\s*push:\s*\n\s*branches:/, "push trigger missing");
-  assert.match(y, /branches:\s*\n\s*-\s*master/, "push branch must be master");
+  assert.match(y, /-\s*master\b/, "push branch must include master literal");
+  assert.match(y, /-\s*'harness\/\*\*'/, "push branch must include 'harness/**' literal");
 });
 
 test("matrix runs windows-latest, macos-15-intel, macos-15 with fail-fast false", () => {
