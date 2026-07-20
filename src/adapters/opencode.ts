@@ -303,6 +303,7 @@ export async function readFirefoxAuthCookie(
     } finally {
       await removeIfPresent(fs, tmp);
       await removeIfPresent(fs, `${tmp}-wal`);
+      await removeIfPresent(fs, `${tmp}-shm`);
     }
   }
   return null;

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { __test as claudeTest } from "../src/adapters/claude.js";
@@ -213,6 +213,29 @@ test("OpenCode still reads Firefox cookies when the optional WAL cannot be copie
   });
 
   assert.equal(cookie, "cookie-without-wal-copy");
+});
+
+test("OpenCode removes Firefox temporary DB, WAL, and SHM companions", async (t) => {
+  const homeDir = await makeTempDir(t);
+  const profilesRoot = path.join(homeDir, "Library", "Application Support", "Firefox", "Profiles");
+  const cookieDb = path.join(profilesRoot, "fixture.default-release", "cookies.sqlite");
+  const tempDir = path.join(homeDir, "tmp");
+  await mkdir(path.dirname(cookieDb), { recursive: true });
+  await mkdir(tempDir, { recursive: true });
+  await writeFile(cookieDb, "fixture-cleanup-cookie");
+
+  const cookie = await readFirefoxAuthCookie({
+    profilesRoot,
+    tempDir,
+    sqliteGet: async (copiedDb) => {
+      await writeFile(`${copiedDb}-wal`, "sqlite-wal");
+      await writeFile(`${copiedDb}-shm`, "sqlite-shm");
+      return "fixture-cleanup-cookie";
+    },
+  });
+
+  assert.equal(cookie, "fixture-cleanup-cookie");
+  assert.deepEqual(await readdir(tempDir), []);
 });
 
 test("OpenCode explicit cookies stay ahead of Firefox discovery", async (t) => {
