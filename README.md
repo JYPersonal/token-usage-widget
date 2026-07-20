@@ -1,12 +1,12 @@
 # Token Usage Widget
 
-**See Codex + Cursor quotas in your Windows corner — without opening five billing pages.**
+**See Codex + Cursor quotas in your corner — without opening five billing pages.**
 
-Local always-on-top widget + browser dashboard for the AI harnesses you actually use. Runs on your machine. MIT. No account for this app.
+Local always-on-top widget + browser dashboard for the AI harnesses you actually use. Runs on your machine (Windows and macOS). MIT. No account for this app.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](./LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/widget-Windows-0078D4.svg)](#windows-corner-widget)
+[![Platform](https://img.shields.io/badge/widget-Windows%20%7C%20macOS-0078D4.svg)](#corner-widget)
 
 **Repo:** [github.com/JYPersonal/token-usage-widget](https://github.com/JYPersonal/token-usage-widget)
 
@@ -16,7 +16,7 @@ Local always-on-top widget + browser dashboard for the AI harnesses you actually
 
 If you bounce between **Codex**, **Cursor**, and other harnesses, usage is scattered across dashboards, CLIs, and billing UIs. This puts the meters you care about in one place:
 
-- **Corner widget** — always on top, tray icon, optional Startup
+- **Corner widget** — always on top, tray / menu-bar icon, optional login Startup
 - **Full dashboard** — `http://127.0.0.1:4321`
 - **Only enabled providers** — you choose what to poll; the rest stay off
 
@@ -36,6 +36,8 @@ Secrets stay in gitignored `config.json`. Default bind is localhost.
 
 <p align="center"><em>Local browser dashboard</em></p>
 
+A macOS screenshot is **not** available for this release — the maintainer has no Mac, so real interactive Mac behavior is unverified. The compact UI is identical on macOS because both platforms share `public/widget.html`, `public/widget.css`, `public/widget.js`, and `public/widget-compact.js`. See [macOS](#macos) and the [evidence index](docs/macos-widget/evidence-index.md).
+
 ## Quick start (≈2 minutes)
 
 ```bash
@@ -43,7 +45,7 @@ git clone https://github.com/JYPersonal/token-usage-widget.git
 cd token-usage-widget
 npm install
 npm run setup:defaults   # OpenAI Codex + Cursor (local login)
-npm run widget:bg        # Windows corner widget
+npm run widget:bg        # corner widget (Windows or macOS)
 ```
 
 Or open the full UI:
@@ -53,7 +55,7 @@ npm start
 # → http://127.0.0.1:4321
 ```
 
-**Requirements:** Node.js 18+. Windows for the Electron widget. `sqlite3` on `PATH` helps Cursor (and some OpenCode fallbacks).
+**Requirements:** Node.js 18+ (CI uses 22). Windows or macOS 13+ (Intel or Apple Silicon) for the Electron widget. `sqlite3` on `PATH` helps Cursor (and some OpenCode fallbacks). Distribution is source-checkout only — no packaged app, DMG, signing, or notarization.
 
 Already logged into Codex CLI and Cursor desktop? `setup:defaults` is usually enough.
 
@@ -65,13 +67,13 @@ Already logged into Codex CLI and Cursor desktop? `setup:defaults` is usually en
 
 ## Features
 
-|                   |                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------ |
-| **Corner widget** | Frameless, always-on-top, bottom-right; auto-starts the local API; revives it if the server dies |
-| **Dashboard**     | Clean multi-provider meters with reset countdowns                                                |
-| **Setup Q&A**     | `npm run setup` — enable providers, paste keys only when needed                                  |
-| **Fail-closed**   | Missing creds → clear unavailable/error, not fake percentages                                    |
-| **Auto-refresh**  | Every 60 seconds                                                                                 |
+|                   |                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Corner widget** | Frameless, always-on-top, bottom-right; auto-starts the local API; revives it if the server dies; persists size     |
+| **Dashboard**     | Clean multi-provider meters with reset countdowns                                                                   |
+| **Setup Q&A**     | `npm run setup` — enable providers, paste keys only when needed                                                     |
+| **Fail-closed**   | Missing creds → clear unavailable/error, not fake percentages                                                       |
+| **Auto-refresh**  | Every 60 seconds                                                                                                    |
 
 ## Providers
 
@@ -106,17 +108,46 @@ Cold start: every provider is **off** until setup (or you edit `providers` in co
 
 Terminal API keys are tried against `GET /zen/go/v1/usage`, but that endpoint is **not live yet**. Live Go meters need a browser session cookie via setup / env / config. Helper: `node --import tsx scripts/save-opencode-cookie.ts`.
 
-## Windows corner widget
+### Provider discovery on macOS
+
+The Cursor and OpenCode adapters discover standard macOS locations when explicit inputs are absent. Explicit inputs always take priority over discovered defaults.
+
+- **Cursor** state database defaults to `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` on macOS and `%APPDATA%/Cursor/User/globalStorage/state.vscdb` on Windows. `CURSOR_TOKEN` / `CURSOR_STATE_DB` overrides remain highest priority.
+- **OpenCode Go** Firefox profile root defaults to `~/Library/Application Support/Firefox/Profiles` on macOS. Cookie / workspace resolution order is unchanged from Windows.
+- **Honest unavailable:** missing credentials stay `unavailable`/error — no synthetic live usage. `OPENCODE_ALLOW_LOCAL_ESTIMATE=1` is the only opt-in estimate path.
+- Safari, Chrome, and Arc cookie extraction is **not** supported.
+
+## Corner widget
 
 ```bash
-npm run widget:bg       # detached — daily use
-npm run widget          # attached — debug
-npm run widget:startup  # Startup shortcut + launch
+npm run widget:bg               # detached — normal use (Windows + macOS)
+npm run widget                  # attached — debug
+npm run widget:startup          # Windows Startup shortcut / macOS LaunchAgent
+npm run widget:startup:disable  # remove login launch (preserves config)
+npm run widget:status           # inspect login-launch status
 ```
 
-Tray: show / hide / open dashboard / quit.
+Frameless, always-on-top, bottom-right of the work area. Starts the local API if needed and revives it if it dies. On Windows the widget lives in the system tray; on macOS it lives in the menu bar with no Dock icon. Tray/menu: show / hide / quit / open full dashboard.
+
+If the configured `server.port` is already taken by an unrelated listener or a fixture-mode mismatch, the widget picks a free loopback port and both the widget and the dashboard use that same returned endpoint. The unrelated listener is left alive. The configured port in `config.json` is never rewritten.
 
 **Never** leave `USAGE_FIXTURE=1` set for normal use (demo data only). Product launches strip fixture mode unless you pass Electron `--fixture` on purpose.
+
+### Windows
+
+`npm run widget:startup` installs a Windows Startup shortcut and launches. Native window close hides the widget (tray restore); custom × and menu Quit exit.
+
+### macOS
+
+macOS 13+ on Intel and Apple Silicon. First release runs from a source checkout with dependencies installed — there is no packaged app, DMG, signing, or notarization.
+
+- **Menu bar, no Dock:** template icon; `app.dock.hide()` keeps it out of the Dock.
+- **Active display:** anchors to the bottom-right of the work area on the display nearest the pointer; reanchors on show / display changes.
+- **Spaces and full-screen:** visible on all normal Spaces; does not overlay full-screen apps.
+- **Hide and quit:** hide restores from the menu bar; custom ×, native close, menu Quit, and Command-Q converge on one quit path that stops only an owned usage-server child.
+- **Login launch:** successful setup modes install or refresh a per-user LaunchAgent. `widget:startup` / `widget:startup:disable` / `widget:status` manage it without deleting `config.json`.
+
+**Automated verification vs. real-Mac observation:** CI passes `npm run verify` on Windows, macOS Intel, and Apple Silicon runners. Real interactive menu-bar, Spaces, full-screen, login-session, and live local Cursor/Firefox discovery on macOS hardware is **unverified** — the maintainer has no Mac. See the [evidence index](docs/macos-widget/evidence-index.md).
 
 ## Dashboard & API
 
@@ -158,10 +189,10 @@ $env:USAGE_FIXTURE='1'; $env:USAGE_FIXTURE_ALL='1'; npm start
 
 ```
 token-usage-widget/
-├── src/           # HTTP server, setup CLI, adapters
+├── src/           # HTTP server, setup CLI, adapters, login launch
 ├── public/        # dashboard + widget UI
-├── desktop/       # Electron + server launch / revive
-├── docs/          # demo screenshots
+├── desktop/       # Electron + platform policy + server launch / revive
+├── docs/          # demo screenshots + macOS evidence index
 ├── scripts/       # widget launch, e2e evidence
 └── tests/
 ```
@@ -177,7 +208,10 @@ token-usage-widget/
 
 - **OpenCode Go** — no official usage API yet (cookie scrape)
 - **Claude / Kimi / Z.AI / Grok** — community / undocumented endpoints; shapes can change
-- Widget launch scripts are **Windows-oriented**
+- **macOS real-hardware behavior is unverified** — CI covers automated paths; interactive Mac observations are skipped (see [evidence index](docs/macos-widget/evidence-index.md))
+- **Source-checkout only** — no packaged app, DMG, signing, or notarization
+- **No Safari/Chrome/Arc cookie extraction** — Firefox only for OpenCode Go discovery
+- **No Linux widget support**
 - Not a hosted SaaS — you run it locally
 
 ## Contributing

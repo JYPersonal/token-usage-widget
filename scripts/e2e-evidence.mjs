@@ -7,7 +7,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { resolveNodeBinary, healthCheck, ensureUsageServer } = require("../desktop/server-launch.cjs");
@@ -54,6 +54,52 @@ function run(cmd, args, opts = {}) {
 
 function nodeBin() {
   return resolveNodeBinary(process.env) || process.execPath;
+}
+
+export function evidenceTarget(endpoint) {
+  return {
+    host: endpoint.host,
+    port: endpoint.port,
+    healthUrl: `${endpoint.baseUrl}/api/health`,
+    usageUrl: `${endpoint.baseUrl}/api/usage`,
+    widgetUrl: `${endpoint.baseUrl}/widget.html`,
+  };
+}
+
+export function evidenceElectronEnv(endpoint, baseEnv = process.env) {
+  return {
+    ...baseEnv,
+    USAGE_HOST: endpoint.host,
+    PORT: String(endpoint.port),
+  };
+}
+
+export function resolveInstalledElectron(options = {}) {
+  const root = options.root || ROOT;
+  const platform = options.platform || process.platform;
+  const existsSync = options.existsSync || fs.existsSync;
+  const loadElectron = options.loadElectron || (() => require("electron"));
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  let packageError = null;
+
+  try {
+    const installedPath = loadElectron();
+    if (typeof installedPath === "string" && existsSync(installedPath)) return installedPath;
+  } catch (err) {
+    packageError = err;
+  }
+
+  const relativePath =
+    platform === "win32"
+      ? pathApi.join("dist", "electron.exe")
+      : platform === "darwin"
+        ? pathApi.join("dist", "Electron.app", "Contents", "MacOS", "Electron")
+        : pathApi.join("dist", "electron");
+  const fallbackPath = pathApi.join(root, "node_modules", "electron", relativePath);
+  if (existsSync(fallbackPath)) return fallbackPath;
+
+  const detail = packageError instanceof Error ? ` (${packageError.message})` : "";
+  throw new Error(`Electron executable is not installed for ${platform}: ${fallbackPath}${detail}`);
 }
 
 function section(lines, title) {
@@ -135,22 +181,29 @@ async function main() {
     });
     lines.push(`- ensureUsageServer nodeBin: \`${serverHandle.nodeBin}\``);
     lines.push(`- reused existing: **${serverHandle.reused}**`);
+    lines.push(`- runtime endpoint: \`${serverHandle.endpoint.baseUrl}\``);
     assertNotElectron(serverHandle.nodeBin);
+    const target = evidenceTarget(serverHandle.endpoint);
 
-    const health = await (await fetch(`http://127.0.0.1:${PORT}/api/health`)).json();
-    const usage = await (await fetch(`http://127.0.0.1:${PORT}/api/usage`)).json();
-    const widget = await fetch(`http://127.0.0.1:${PORT}/widget.html`);
+    const health = await (await fetch(target.healthUrl)).json();
+    const usage = await (await fetch(target.usageUrl)).json();
+    const widget = await fetch(target.widgetUrl);
     lines.push(`- health.status: **${health.status}**, fixture: **${health.fixture}**`);
     lines.push(`- usage.providers: **${usage.providers.map((p) => p.provider).join(", ")}**`);
     lines.push(`- widget.html HTTP: **${widget.status}**`);
 
     // Launch Electron against this already-running server (widget will reuse health)
-    const electron = path.join(ROOT, "node_modules", "electron", "dist", "electron.exe");
-    if (!fs.existsSync(electron)) throw new Error(`missing ${electron}`);
+    const electron = resolveInstalledElectron();
+    lines.push(`- electron executable: \`${electron}\``);
     // Electron main strips USAGE_FIXTURE unless argv includes --fixture (product path stays live).
     widgetProc = spawn(electron, [ROOT, "--fixture"], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT), USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1", NODE_BINARY: resolveNodeBinary(process.env) },
+      env: {
+        ...evidenceElectronEnv(serverHandle.endpoint),
+        USAGE_FIXTURE: "1",
+        USAGE_FIXTURE_ALL: "1",
+        NODE_BINARY: resolveNodeBinary(process.env),
+      },
       stdio: "ignore",
       windowsHide: false,
       detached: true,
@@ -158,7 +211,7 @@ async function main() {
     widgetProc.unref();
     await new Promise((r) => setTimeout(r, 8000));
 
-    const stillHealthy = await healthCheck("127.0.0.1", PORT);
+    const stillHealthy = await healthCheck(target.host, target.port);
     // On Windows detached Electron may report exitCode early for the launcher; treat pid alive as success.
     let electronAlive = widgetProc.exitCode === null && !widgetProc.killed;
     if (!electronAlive && widgetProc.pid) {
@@ -228,7 +281,10 @@ function assertNotElectron(bin) {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
+if (invokedPath === import.meta.url) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { copyFile, readdir, readFile, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import type { Config } from "../config.js";
@@ -185,19 +186,61 @@ function readJsonFile(filePath: string): Record<string, unknown> | null {
   }
 }
 
-export async function resolveWorkspaceId(cfg: Config): Promise<string | null> {
+export interface OpenCodePathOptions {
+  platform?: NodeJS.Platform;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface FirefoxFileSystem {
+  exists(filePath: string): boolean;
+  list(directoryPath: string): Promise<string[]>;
+  copy(sourcePath: string, destinationPath: string): Promise<void>;
+  remove(filePath: string): Promise<void>;
+}
+
+export interface OpenCodeAdapterOptions extends OpenCodePathOptions {
+  profilesRoot?: string;
+  tempDir?: string;
+  firefoxFs?: FirefoxFileSystem;
+  sqliteGet?: (dbPath: string, sql: string) => Promise<string>;
+  fetchImpl?: typeof fetch;
+  onCleanupError?: (error: Error) => void;
+}
+
+const defaultFirefoxFs: FirefoxFileSystem = {
+  exists: existsSync,
+  list: (directoryPath) => readdir(directoryPath),
+  copy: (sourcePath, destinationPath) => copyFile(sourcePath, destinationPath),
+  remove: (filePath) => unlink(filePath),
+};
+
+export function resolveFirefoxProfilesRoot(options: OpenCodePathOptions = {}): string {
+  const platform = options.platform ?? process.platform;
+  const homeDir = options.homeDir ?? os.homedir();
+  return platform === "darwin"
+    ? path.join(homeDir, "Library", "Application Support", "Firefox", "Profiles")
+    : path.join(homeDir, "AppData", "Roaming", "Mozilla", "Firefox", "Profiles");
+}
+
+export async function resolveWorkspaceId(
+  cfg: Config,
+  options: OpenCodePathOptions = {},
+): Promise<string | null> {
   if (cfg.opencode.go.workspaceId) return cfg.opencode.go.workspaceId;
-  const env = process.env.OPENCODE_GO_WORKSPACE_ID?.trim();
+  const envVars = options.env ?? process.env;
+  const homeDir = options.homeDir ?? os.homedir();
+  const env = envVars.OPENCODE_GO_WORKSPACE_ID?.trim();
   if (env) return env;
 
   const pluginCfg = readJsonFile(
-    path.join(os.homedir(), ".config", "opencode", "opencode-go-usage.json"),
+    path.join(homeDir, ".config", "opencode", "opencode-go-usage.json"),
   );
   if (typeof pluginCfg?.workspaceId === "string" && pluginCfg.workspaceId.trim()) {
     return pluginCfg.workspaceId.trim();
   }
 
-  const logPath = path.join(os.homedir(), ".local", "share", "opencode", "log", "opencode.log");
+  const logPath = path.join(homeDir, ".local", "share", "opencode", "log", "opencode.log");
   try {
     const text = await readFile(logPath, "utf8");
     const match = text.match(/wrk_[A-Z0-9]+/);
@@ -208,67 +251,105 @@ export async function resolveWorkspaceId(cfg: Config): Promise<string | null> {
   return null;
 }
 
-async function readFirefoxAuthCookie(): Promise<string | null> {
-  const profilesRoot = path.join(os.homedir(), "AppData", "Roaming", "Mozilla", "Firefox", "Profiles");
-  if (!existsSync(profilesRoot)) return null;
-  let dirs: string[] = [];
+async function sqliteScalar(dbPath: string, sql: string): Promise<string> {
+  const { stdout } = await execFileAsync("sqlite3", [dbPath, sql], {
+    windowsHide: true,
+    encoding: "utf8",
+  });
+  return String(stdout).trim();
+}
+
+function defaultCleanupErrorReporter(error: Error): void {
+  console.warn(error.message);
+}
+
+function reportCleanupError(reporter: (error: Error) => void, error: Error): void {
   try {
-    dirs = await readdir(profilesRoot);
+    reporter(error);
+  } catch {
+    defaultCleanupErrorReporter(error);
+  }
+}
+
+async function cleanupTempFile(
+  fs: FirefoxFileSystem,
+  filePath: string,
+  reporter: (error: Error) => void,
+): Promise<void> {
+  try {
+    if (!fs.exists(filePath)) return;
+    await fs.remove(filePath);
+    if (fs.exists(filePath)) {
+      throw new Error("Temporary file remained after removal.");
+    }
+  } catch (cause) {
+    reportCleanupError(
+      reporter,
+      new Error("Firefox credential temporary file cleanup failed.", { cause }),
+    );
+  }
+}
+
+export async function readFirefoxAuthCookie(
+  options: OpenCodeAdapterOptions = {},
+): Promise<string | null> {
+  const profilesRoot = options.profilesRoot ?? resolveFirefoxProfilesRoot(options);
+  const fs = options.firefoxFs ?? defaultFirefoxFs;
+  const cleanupErrorReporter = options.onCleanupError ?? defaultCleanupErrorReporter;
+  if (!fs.exists(profilesRoot)) return null;
+
+  let dirs: string[];
+  try {
+    dirs = await fs.list(profilesRoot);
   } catch {
     return null;
   }
+
   for (const dir of dirs) {
     const dbPath = path.join(profilesRoot, dir, "cookies.sqlite");
-    if (!existsSync(dbPath)) continue;
-    const tmp = path.join(os.tmpdir(), `ff-oc-${Date.now()}.sqlite`);
+    if (!fs.exists(dbPath)) continue;
+    const tmp = path.join(options.tempDir ?? os.tmpdir(), `ff-oc-${randomUUID()}.sqlite`);
     try {
-      const { copyFileSync } = await import("node:fs");
-      copyFileSync(dbPath, tmp);
-      try {
-        copyFileSync(`${dbPath}-wal`, `${tmp}-wal`);
-      } catch {
-        // optional
+      await fs.copy(dbPath, tmp);
+      if (fs.exists(`${dbPath}-wal`)) {
+        try {
+          await fs.copy(`${dbPath}-wal`, `${tmp}-wal`);
+        } catch {
+          // WAL is optional; the copied main database may still contain the auth cookie.
+        }
       }
-      const { stdout } = await execFileAsync(
-        "sqlite3",
-        [
-          tmp,
-          "SELECT value FROM moz_cookies WHERE host LIKE '%opencode.ai%' AND name='auth' ORDER BY expiry DESC LIMIT 1;",
-        ],
-        { windowsHide: true, encoding: "utf8" },
+      const value = await (options.sqliteGet ?? sqliteScalar)(
+        tmp,
+        "SELECT value FROM moz_cookies WHERE host LIKE '%opencode.ai%' AND name='auth' ORDER BY expiry DESC LIMIT 1;",
       );
-      const value = String(stdout).trim();
-      if (value) return value;
+      if (value.trim()) return value.trim();
     } catch {
       // try next profile
     } finally {
-      try {
-        const { unlinkSync } = await import("node:fs");
-        unlinkSync(tmp);
-        try {
-          unlinkSync(`${tmp}-wal`);
-        } catch {
-          // ignore
-        }
-      } catch {
-        // ignore
-      }
+      await cleanupTempFile(fs, tmp, cleanupErrorReporter);
+      await cleanupTempFile(fs, `${tmp}-wal`, cleanupErrorReporter);
+      await cleanupTempFile(fs, `${tmp}-shm`, cleanupErrorReporter);
     }
   }
   return null;
 }
 
-export async function resolveAuthCookie(cfg: Config): Promise<string | null> {
+export async function resolveAuthCookie(
+  cfg: Config,
+  options: OpenCodeAdapterOptions = {},
+): Promise<string | null> {
   if (cfg.opencode.go.authCookie) return cfg.opencode.go.authCookie;
-  const env = process.env.OPENCODE_GO_AUTH_COOKIE?.trim();
+  const envVars = options.env ?? process.env;
+  const homeDir = options.homeDir ?? os.homedir();
+  const env = envVars.OPENCODE_GO_AUTH_COOKIE?.trim();
   if (env) return env;
   const pluginCfg = readJsonFile(
-    path.join(os.homedir(), ".config", "opencode", "opencode-go-usage.json"),
+    path.join(homeDir, ".config", "opencode", "opencode-go-usage.json"),
   );
   if (typeof pluginCfg?.authCookie === "string" && pluginCfg.authCookie.trim()) {
     return pluginCfg.authCookie.trim();
   }
-  const fileEnv = process.env.OPENCODE_GO_AUTH_COOKIE_FILE?.trim();
+  const fileEnv = envVars.OPENCODE_GO_AUTH_COOKIE_FILE?.trim();
   if (fileEnv && existsSync(fileEnv)) {
     try {
       const v = (await readFile(fileEnv, "utf8")).trim();
@@ -277,14 +358,16 @@ export async function resolveAuthCookie(cfg: Config): Promise<string | null> {
       // ignore
     }
   }
-  return readFirefoxAuthCookie();
+  return readFirefoxAuthCookie(options);
 }
 
-function readApiKey(): string | null {
-  const auth = readJsonFile(path.join(os.homedir(), ".local", "share", "opencode", "auth.json"));
+function readApiKey(options: OpenCodePathOptions = {}): string | null {
+  const homeDir = options.homeDir ?? os.homedir();
+  const env = options.env ?? process.env;
+  const auth = readJsonFile(path.join(homeDir, ".local", "share", "opencode", "auth.json"));
   const go = auth?.["opencode-go"] as Record<string, unknown> | undefined;
   if (go && typeof go.key === "string" && go.key.trim()) return go.key.trim();
-  return process.env.OPENCODE_GO_API_KEY?.trim() || null;
+  return env.OPENCODE_GO_API_KEY?.trim() || null;
 }
 
 function normalizeApiWindow(raw: unknown): GoWindowScraped | undefined {
@@ -296,8 +379,11 @@ function normalizeApiWindow(raw: unknown): GoWindowScraped | undefined {
   return { usagePercent, resetInSec };
 }
 
-export async function fetchGoUsageApi(apiKey: string): Promise<GoUsageSnapshot | null> {
-  const res = await fetch(USAGE_API_URL, {
+export async function fetchGoUsageApi(
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<GoUsageSnapshot | null> {
+  const res = await fetchImpl(USAGE_API_URL, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
@@ -321,9 +407,10 @@ export async function fetchGoUsageApi(apiKey: string): Promise<GoUsageSnapshot |
 export async function scrapeGoDashboard(
   workspaceId: string,
   authCookie: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<GoUsageSnapshot | null> {
   const url = `${DASHBOARD_PREFIX}${encodeURIComponent(workspaceId)}/go`;
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html",
@@ -473,12 +560,16 @@ async function fetchLocalEstimate(cfg: Config): Promise<ProviderUsage> {
   };
 }
 
-export async function fetchOpenCodeUsage(cfg: Config): Promise<ProviderUsage> {
+export async function fetchOpenCodeUsage(
+  cfg: Config,
+  options: OpenCodeAdapterOptions = {},
+): Promise<ProviderUsage> {
   const fetchedAt = new Date().toISOString();
-  const apiKey = readApiKey();
+  const env = options.env ?? process.env;
+  const apiKey = readApiKey(options);
   if (apiKey) {
     try {
-      const apiSnap = await fetchGoUsageApi(apiKey);
+      const apiSnap = await fetchGoUsageApi(apiKey, options.fetchImpl);
       if (apiSnap) {
         return {
           provider: "opencode",
@@ -492,12 +583,12 @@ export async function fetchOpenCodeUsage(cfg: Config): Promise<ProviderUsage> {
     }
   }
 
-  const workspaceId = await resolveWorkspaceId(cfg);
-  const authCookie = await resolveAuthCookie(cfg);
+  const workspaceId = await resolveWorkspaceId(cfg, options);
+  const authCookie = await resolveAuthCookie(cfg, options);
 
   if (workspaceId && authCookie) {
     try {
-      const snap = await scrapeGoDashboard(workspaceId, authCookie);
+      const snap = await scrapeGoDashboard(workspaceId, authCookie, options.fetchImpl);
       if (snap) {
         return {
           provider: "opencode",
@@ -543,13 +634,13 @@ export async function fetchOpenCodeUsage(cfg: Config): Promise<ProviderUsage> {
     .filter(Boolean)
     .join(" and ");
 
-  if (process.env.OPENCODE_ALLOW_LOCAL_ESTIMATE === "1") {
+  if (env.OPENCODE_ALLOW_LOCAL_ESTIMATE === "1") {
     const estimate = await fetchLocalEstimate(cfg);
     estimate.error = `Missing ${missing} for live Go plan meters. ${estimate.error ?? ""}`.trim();
     return estimate;
   }
 
-  const hasApiKey = Boolean(readApiKey());
+  const hasApiKey = Boolean(readApiKey(options));
   const reason = hasApiKey
     ? "OpenCode API key is present, but Go plan meters (rolling/weekly/monthly) are not exposed via API yet — only the website. Until OpenCode ships that endpoint, set a browser `auth` cookie (or keep Firefox logged into opencode.ai so we can read it)."
     : `Set ${missing} to load live OpenCode Go rolling/weekly/monthly meters from opencode.ai (API key login alone cannot read Go plan quotas today).`;

@@ -9,6 +9,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
+import { pathToFileURL } from "node:url";
 import {
   DEFAULT_ENABLED,
   SETUP_DEFAULTS_ENABLED,
@@ -18,6 +19,12 @@ import {
 } from "../config.js";
 import { ALL_PROVIDER_IDS, type ProviderId } from "../types.js";
 import { PROVIDER_META } from "../providers/registry.js";
+import {
+  installLoginLaunch,
+  type LoginLaunchSeams,
+  type LoginLaunchResult,
+} from "../login-launch.js";
+import { defaultSeams as buildStartupSeams } from "./startup.js";
 
 type SecretKind = "openrouter" | "kimi" | "zai" | "grok" | "claude" | "opencode_cookie" | null;
 
@@ -257,24 +264,76 @@ async function runInteractive(): Promise<void> {
   writeConfig(merged);
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const defaults = args.includes("--defaults");
-  const all = args.includes("--all");
-  if (defaults) {
-    await runDefaults(all);
-    return;
-  }
-  if (all && !defaults) {
-    // eslint-disable-next-line no-console
-    console.error("--all is only valid with --defaults");
-    process.exit(1);
-  }
-  await runInteractive();
+export type SetupRunInteractive = () => Promise<void>;
+export type SetupRunDefaults = (enableAll: boolean) => Promise<void>;
+export type SetupInstallLoginLaunch = (seams: LoginLaunchSeams) => Promise<LoginLaunchResult>;
+export type SetupBuildSeams = () => LoginLaunchSeams;
+
+export interface SetupDeps {
+  runInteractive: SetupRunInteractive;
+  runDefaults: SetupRunDefaults;
+  installLoginLaunch: SetupInstallLoginLaunch;
+  buildSeams: SetupBuildSeams;
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error(err);
-  process.exit(1);
-});
+/**
+ * On darwin, after a successful setup (config save), install/refresh the
+ * per-user login launch using the current checkout's default seams. On other
+ * platforms, setup runs unchanged. Repeated setup calls refresh the agent.
+ *
+ * If the setup op rejects, registration is never attempted and the original
+ * error propagates. If registration rejects after save, throw an actionable
+ * error containing "startup was not enabled" and the retry command
+ * "npm run widget:startup"; config is left as the setup op wrote it.
+ */
+export async function runSetup(args: string[], deps?: SetupDeps): Promise<void> {
+  const defaults = args.includes("--defaults");
+  const all = args.includes("--all");
+  if (all && !defaults) {
+    throw new Error("--all is only valid with --defaults");
+  }
+
+  const resolved: SetupDeps = deps ?? {
+    runInteractive,
+    runDefaults,
+    installLoginLaunch,
+    buildSeams: buildStartupSeams,
+  };
+
+  if (defaults) {
+    await resolved.runDefaults(all);
+  } else {
+    await resolved.runInteractive();
+  }
+
+  if (process.platform !== "darwin") return;
+
+  try {
+    await resolved.installLoginLaunch(resolved.buildSeams());
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `startup was not enabled: ${reason}. Retry with: npm run widget:startup`,
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  try {
+    await runSetup(process.argv.slice(2));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.error(msg);
+    process.exit(1);
+  }
+}
+
+const invokedDirectly =
+  typeof process !== "undefined" &&
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (invokedDirectly) {
+  void main();
+}
