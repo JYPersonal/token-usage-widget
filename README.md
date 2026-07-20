@@ -161,7 +161,7 @@ token-usage-widget/
 ├── src/           # HTTP server, setup CLI, adapters
 ├── public/        # dashboard + widget UI
 ├── desktop/       # Electron + server launch / revive
-├── docs/          # demos + marketing drafts
+├── docs/          # demo screenshots
 ├── scripts/       # widget launch, e2e evidence
 └── tests/
 ```
@@ -180,10 +180,13 @@ token-usage-widget/
 - Widget launch scripts are **Windows-oriented**  
 - Not a hosted SaaS — you run it locally  
 
-## Share & contribute
+## Contributing
 
-- **Marketing drafts** (X, Reddit, Dev.to, daily.dev, HN): [`docs/marketing/`](./docs/marketing/)  
-- Issues and PRs welcome. Run `npm run verify` before a PR. Prefer fail-closed over invented percentages.
+Issues and PRs welcome. Please:
+
+1. Run `npm run verify` before opening a PR  
+2. Keep secrets out of the repo  
+3. Prefer fail-closed (`unavailable` / clear error) over invented percentages  
 
 ## License
 
