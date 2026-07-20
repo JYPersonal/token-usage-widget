@@ -10,7 +10,7 @@ Supports: **OpenAI Codex**, **OpenCode Go**, **Cursor**, **Claude**, **OpenRoute
 
 Windows corner widget (always-on-top):
 
-![Corner widget showing Codex and Cursor usage](docs/widget-demo.png)
+![Windows corner widget showing Codex and Cursor usage](docs/widget-corner-demo.png)
 
 Browser dashboard at `http://127.0.0.1:4321`:
 

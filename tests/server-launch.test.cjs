@@ -71,3 +71,39 @@ test("ensureUsageServer starts fixture server with real node (not electron)", as
     if (result.proc && !result.proc.killed) result.proc.kill();
   }
 });
+
+test("ensureUsageServer restarts after the child process dies", async () => {
+  const port = 18766;
+  assert.equal(await healthCheck("127.0.0.1", port, 500), false);
+
+  const first = await ensureUsageServer({
+    host: "127.0.0.1",
+    port,
+    env: { ...process.env, USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1", PORT: String(port) },
+    maxAttempts: 60,
+  });
+  assert.ok(first.proc);
+
+  first.proc.kill();
+  const deadAt = Date.now();
+  while (await healthCheck("127.0.0.1", port, 400)) {
+    if (Date.now() - deadAt > 10_000) assert.fail("server did not die after kill");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  const second = await ensureUsageServer({
+    host: "127.0.0.1",
+    port,
+    env: { ...process.env, USAGE_FIXTURE: "1", USAGE_FIXTURE_ALL: "1", PORT: String(port) },
+    maxAttempts: 60,
+  });
+
+  try {
+    assert.equal(second.reused, false);
+    assert.ok(second.proc);
+    assert.notEqual(second.proc.pid, first.proc.pid);
+    assert.equal(await healthCheck("127.0.0.1", port), true);
+  } finally {
+    if (second.proc && !second.proc.killed) second.proc.kill();
+  }
+});

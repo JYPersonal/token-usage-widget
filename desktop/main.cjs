@@ -20,6 +20,15 @@ let tray = null;
 /** @type {import('node:child_process').ChildProcess | null} */
 let serverProc = null;
 let startedServer = false;
+/** @type {Promise<unknown> | null} */
+let ensurePromise = null;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let reviveTimer = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let healthTimer = null;
+let reviveFailures = 0;
+const HEALTH_POLL_MS = 15_000;
+const MAX_REVIVE_FAILURES = 12;
 
 function widgetServerEnv() {
   const env = { ...process.env };
@@ -31,21 +40,90 @@ function widgetServerEnv() {
   return env;
 }
 
-async function ensureServer() {
-  const result = await ensureUsageServer({
-    host: HOST,
-    port: PORT,
-    root: ROOT,
-    env: widgetServerEnv(),
-  });
-  if (result.proc) {
-    serverProc = result.proc;
-    startedServer = true;
-    serverProc.on("exit", () => {
+function bindServerProc(proc) {
+  if (!proc) return;
+  serverProc = proc;
+  startedServer = true;
+  proc.once("exit", (code, signal) => {
+    if (serverProc === proc) {
       serverProc = null;
       startedServer = false;
+    }
+    if (app.isQuitting) return;
+    console.error(`[widget] usage server exited code=${code} signal=${signal}; scheduling revive`);
+    scheduleRevive(400);
+  });
+}
+
+async function ensureServer() {
+  if (ensurePromise) return ensurePromise;
+  ensurePromise = (async () => {
+    const result = await ensureUsageServer({
+      host: HOST,
+      port: PORT,
+      root: ROOT,
+      env: widgetServerEnv(),
     });
+    if (result.proc) {
+      bindServerProc(result.proc);
+    }
+    reviveFailures = 0;
+    return result;
+  })().finally(() => {
+    ensurePromise = null;
+  });
+  return ensurePromise;
+}
+
+function scheduleRevive(delayMs) {
+  if (app.isQuitting) return;
+  if (reviveTimer) clearTimeout(reviveTimer);
+  reviveTimer = setTimeout(() => {
+    reviveTimer = null;
+    void reviveIfNeeded();
+  }, delayMs);
+}
+
+/**
+ * Root-cause fix: usage server used to start once; if it died, the renderer
+ * kept showing "fail" forever. Revive whenever health is down.
+ */
+async function reviveIfNeeded() {
+  if (app.isQuitting) return { ok: false, reason: "quitting" };
+  const health = await fetchHealth(HOST, PORT);
+  if (health?.ok) {
+    if (health.fixture && !ALLOW_FIXTURE) {
+      return { ok: false, reason: "fixture_mismatch" };
+    }
+    reviveFailures = 0;
+    return { ok: true, reason: "healthy" };
   }
+  if (reviveFailures >= MAX_REVIVE_FAILURES) {
+    return { ok: false, reason: "give_up" };
+  }
+  try {
+    await ensureServer();
+    const again = await fetchHealth(HOST, PORT);
+    if (again?.ok && !(again.fixture && !ALLOW_FIXTURE)) {
+      reviveFailures = 0;
+      return { ok: true, reason: "restarted" };
+    }
+    reviveFailures += 1;
+    scheduleRevive(Math.min(30_000, 1000 * reviveFailures));
+    return { ok: false, reason: "not_ready" };
+  } catch (err) {
+    reviveFailures += 1;
+    console.error("[widget] revive failed:", err instanceof Error ? err.message : err);
+    scheduleRevive(Math.min(30_000, 1000 * reviveFailures));
+    return { ok: false, reason: "error", error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function startHealthWatchdog() {
+  if (healthTimer) return;
+  healthTimer = setInterval(() => {
+    void reviveIfNeeded();
+  }, HEALTH_POLL_MS);
 }
 
 function cornerBounds() {
@@ -145,6 +223,14 @@ function buildTray() {
 }
 
 function stopServer() {
+  if (reviveTimer) {
+    clearTimeout(reviveTimer);
+    reviveTimer = null;
+  }
+  if (healthTimer) {
+    clearInterval(healthTimer);
+    healthTimer = null;
+  }
   if (startedServer && serverProc && !serverProc.killed) {
     try {
       serverProc.kill();
@@ -162,6 +248,8 @@ ipcMain.handle("widget:close", () => {
 ipcMain.handle("widget:open-dashboard", () => {
   shell.openExternal(`http://${HOST}:${PORT}/`);
 });
+
+ipcMain.handle("widget:ensure-server", async () => reviveIfNeeded());
 
 ipcMain.handle("widget:quit", () => {
   app.isQuitting = true;
@@ -197,6 +285,7 @@ if (!gotLock) {
       app.quit();
       return;
     }
+    startHealthWatchdog();
     createWindow();
     buildTray();
   });

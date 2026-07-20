@@ -30,15 +30,26 @@ function renderAll(data) {
   statusEl.classList.remove("error");
 }
 
+async function loadUsage() {
+  const res = await fetch("/api/usage", { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  renderAll(await res.json());
+}
+
 async function refresh() {
   try {
-    const res = await fetch("/api/usage", { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    renderAll(await res.json());
+    await loadUsage();
   } catch (err) {
     statusEl.textContent = `fail`;
     statusEl.classList.add("error");
     statusEl.title = String(err.message || err);
+    // Main process owns the Node usage server; ask it to revive, then retry once.
+    try {
+      const revived = await window.widgetBridge?.ensureServer?.();
+      if (revived?.ok) await loadUsage();
+    } catch (retryErr) {
+      statusEl.title = String(retryErr.message || retryErr);
+    }
   }
 }
 
