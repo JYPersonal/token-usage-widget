@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { formatReset } = require("../public/fmt.js");
+const { formatReset, formatResetShort } = require("../public/fmt.js");
 
 test("formatReset returns empty for null/invalid", () => {
   assert.equal(formatReset(null), "");
@@ -31,4 +31,19 @@ test("formatReset days path omits minutes", () => {
   const out = formatReset(iso, now);
   assert.match(out, /^Resets in 2 days 3 hours · /);
   assert.doesNotMatch(out, /minute/);
+});
+
+test("formatResetShort returns compact countdown", () => {
+  const now = Date.parse("2026-07-19T12:00:00.000Z");
+  assert.equal(formatResetShort(null), "");
+  assert.equal(formatResetShort(new Date(now - 1000).toISOString(), now), "now");
+  assert.equal(
+    formatResetShort(new Date(now + (2 * 24 * 3600 + 3 * 3600) * 1000).toISOString(), now),
+    "2d 3h",
+  );
+  assert.equal(
+    formatResetShort(new Date(now + (2 * 3600 + 15 * 60) * 1000).toISOString(), now),
+    "2h 15m",
+  );
+  assert.equal(formatResetShort(new Date(now + 45 * 60 * 1000).toISOString(), now), "45m");
 });

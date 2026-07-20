@@ -70,3 +70,38 @@ test("claude compact shows used percent windows", () => {
   });
   assert.equal(line, "claude: 5h 42%, Week 61%");
 });
+
+test("codex compact appends short reset per ok window", () => {
+  const now = Date.parse("2026-07-20T12:00:00.000Z");
+  const weekReset = new Date(now + (3 * 24 * 3600 + 5 * 3600) * 1000).toISOString();
+  const line = providerLine(
+    {
+      provider: "openai",
+      windows: {
+        five_hour: { status: "unavailable", usedPercent: null, remainingPercent: null },
+        week: { status: "ok", usedPercent: 47, remainingPercent: 53, resetsAtIso: weekReset },
+        month: { status: "unavailable", usedPercent: null, remainingPercent: null },
+      },
+    },
+    { nowMs: now },
+  );
+  assert.equal(line, "codex: 5h NA, Week 53% (3d 5h)");
+});
+
+test("cursor compact appends cycle reset countdown", () => {
+  const now = Date.parse("2026-07-20T12:00:00.000Z");
+  const cycleReset = new Date(now + 12 * 24 * 3600 * 1000).toISOString();
+  const line = providerLine(
+    {
+      provider: "cursor",
+      billing: {
+        totalPercentUsed: 23,
+        autoPercentUsed: 13,
+        apiPercentUsed: 99,
+        resetsAtIso: cycleReset,
+      },
+    },
+    { nowMs: now },
+  );
+  assert.equal(line, "cursor: total 23% first party 13% API 99% · 12d");
+});

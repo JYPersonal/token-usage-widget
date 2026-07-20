@@ -12,7 +12,21 @@
     return `${Math.round(Number(v))}%`;
   }
 
-  function winPart(label, win, mode = "used") {
+  function shortReset(iso, nowMs) {
+    const fmt = globalThis.TokenUsageFmt;
+    if (fmt?.formatResetShort) return fmt.formatResetShort(iso, nowMs) || "";
+    // Node tests may load this module before fmt.js sets the global.
+    if (typeof require === "function") {
+      try {
+        return require("./fmt.js").formatResetShort(iso, nowMs) || "";
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  }
+
+  function winPart(label, win, mode = "used", nowMs) {
     if (!win || win.status !== "ok") {
       return `${label} NA`;
     }
@@ -20,7 +34,9 @@
     if (raw === null || raw === undefined || Number.isNaN(Number(raw))) {
       return `${label} NA`;
     }
-    return `${label} ${pct(raw)}`;
+    const base = `${label} ${pct(raw)}`;
+    const reset = shortReset(win.resetsAtIso, nowMs);
+    return reset ? `${base} (${reset})` : base;
   }
 
   function money(n) {
@@ -28,8 +44,13 @@
     return Number(n).toFixed(2);
   }
 
+  function withCycleReset(line, iso, nowMs) {
+    const reset = shortReset(iso, nowMs);
+    return reset ? `${line} · ${reset}` : line;
+  }
+
   /** Window-style used% line for claude / kimi / zai (and similar). */
-  function windowUsedLine(name, p) {
+  function windowUsedLine(name, p, nowMs) {
     const labels = [
       ["5h", "five_hour"],
       ["Week", "week"],
@@ -39,13 +60,17 @@
     for (const [label, id] of labels) {
       const w = p.windows?.[id];
       if (id === "month" && (!w || w.status !== "ok")) continue;
-      bits.push(winPart(label, w, "used"));
+      bits.push(winPart(label, w, "used", nowMs));
     }
     return `${name}: ${bits.join(", ")}`;
   }
 
-  /** @param {{ provider: string, label?: string, windows?: any, billing?: any, balance?: any, error?: string }} p */
-  function providerLine(p) {
+  /**
+   * @param {{ provider: string, label?: string, windows?: any, billing?: any, balance?: any, error?: string }} p
+   * @param {{ nowMs?: number }} [opts]
+   */
+  function providerLine(p, opts) {
+    const nowMs = opts?.nowMs ?? Date.now();
     const name =
       p.provider === "openai"
         ? "codex"
@@ -64,7 +89,8 @@
       const b = p.billing;
       if (!b) {
         const m = p.windows?.month;
-        return `${name}: total ${m?.status === "ok" ? pct(m.usedPercent) ?? "NA" : "NA"}`;
+        const total = `${name}: total ${m?.status === "ok" ? pct(m.usedPercent) ?? "NA" : "NA"}`;
+        return withCycleReset(total, m?.resetsAtIso, nowMs);
       }
       const parts = [`total ${pct(b.totalPercentUsed) ?? "NA"}`];
       if (b.autoPercentUsed !== null && b.autoPercentUsed !== undefined) {
@@ -73,27 +99,28 @@
       if (b.apiPercentUsed !== null && b.apiPercentUsed !== undefined) {
         parts.push(`API ${pct(b.apiPercentUsed)}`);
       }
-      return `${name}: ${parts.join(" ")}`;
+      return withCycleReset(`${name}: ${parts.join(" ")}`, b.resetsAtIso, nowMs);
     }
 
     if (p.provider === "openrouter") {
       const rem = p.balance?.remaining;
       const amt = money(rem);
-      return amt !== null ? `openrouter: $${amt} left` : "openrouter: NA";
+      const base = amt !== null ? `openrouter: $${amt} left` : "openrouter: NA";
+      return withCycleReset(base, p.balance?.resetsAtIso, nowMs);
     }
 
     if (p.provider === "claude" || p.provider === "kimi" || p.provider === "zai") {
-      return windowUsedLine(name, p);
+      return windowUsedLine(name, p, nowMs);
     }
 
     if (p.provider === "grok") {
       const rem = p.balance?.remaining;
       if (rem !== null && rem !== undefined && !Number.isNaN(Number(rem))) {
-        return `grok: ${Math.round(Number(rem))} credits left`;
+        return withCycleReset(`grok: ${Math.round(Number(rem))} credits left`, p.balance?.resetsAtIso, nowMs);
       }
       const m = p.windows?.month;
       if (m?.status === "ok") {
-        return `grok: month ${pct(m.usedPercent) ?? "NA"}`;
+        return `grok: ${winPart("month", m, "used", nowMs)}`;
       }
       return "grok: NA";
     }
@@ -118,7 +145,7 @@
     for (const [label, id] of labels) {
       const w = p.windows?.[id];
       if (id === "month" && (!w || w.status !== "ok")) continue;
-      bits.push(winPart(label, w, mode));
+      bits.push(winPart(label, w, mode, nowMs));
     }
     return `${name}: ${bits.join(", ")}`;
   }

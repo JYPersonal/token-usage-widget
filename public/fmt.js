@@ -40,5 +40,27 @@
     return `Resets in ${parts.join(" ")} · ${when}`;
   }
 
-  return { formatReset };
+  /**
+   * Compact countdown for the corner widget (e.g. "3d 5h", "2h 15m", "now").
+   * @param {string | null | undefined} iso
+   * @param {number} [nowMs]
+   * @returns {string}
+   */
+  function formatResetShort(iso, nowMs = Date.now()) {
+    if (!iso) return "";
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return "";
+    const diff = t - nowMs;
+    if (diff <= 0) return "now";
+
+    const totalMin = Math.max(0, Math.round(diff / 60000));
+    const days = Math.floor(totalMin / (60 * 24));
+    const hours = Math.floor((totalMin % (60 * 24)) / 60);
+    const mins = totalMin % 60;
+    if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+    if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    return `${mins}m`;
+  }
+
+  return { formatReset, formatResetShort };
 });
