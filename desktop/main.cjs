@@ -19,7 +19,9 @@ let win = null;
 let tray = null;
 /** @type {import('node:child_process').ChildProcess | null} */
 let serverProc = null;
-let startedServer = false;
+let ownsServer = false;
+/** @type {{ host: string, port: number, baseUrl: string } | null} */
+let serverEndpoint = null;
 
 function widgetServerEnv() {
   const env = { ...process.env };
@@ -38,14 +40,23 @@ async function ensureServer() {
     root: ROOT,
     env: widgetServerEnv(),
   });
-  if (result.proc) {
+  serverEndpoint = result.endpoint;
+  if (result.owned && result.proc) {
     serverProc = result.proc;
-    startedServer = true;
+    ownsServer = true;
     serverProc.on("exit", () => {
       serverProc = null;
-      startedServer = false;
+      ownsServer = false;
     });
   }
+  return result.endpoint;
+}
+
+function currentServerEndpoint() {
+  if (!serverEndpoint) {
+    throw new Error("Usage server endpoint is unavailable before startup completes");
+  }
+  return serverEndpoint;
 }
 
 function cornerBounds() {
@@ -89,7 +100,7 @@ function createWindow() {
 
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.loadURL(`http://${HOST}:${PORT}/widget.html`);
+  win.loadURL(`${currentServerEndpoint().baseUrl}/widget.html`);
 
   win.once("ready-to-show", () => {
     win?.showInactive();
@@ -125,7 +136,7 @@ function buildTray() {
     },
     {
       label: "Open full dashboard",
-      click: () => shell.openExternal(`http://${HOST}:${PORT}/`),
+      click: () => shell.openExternal(`${currentServerEndpoint().baseUrl}/`),
     },
     { type: "separator" },
     {
@@ -145,14 +156,15 @@ function buildTray() {
 }
 
 function stopServer() {
-  if (startedServer && serverProc && !serverProc.killed) {
+  if (ownsServer && serverProc && !serverProc.killed) {
     try {
       serverProc.kill();
     } catch {
       // ignore
     }
-    serverProc = null;
   }
+  serverProc = null;
+  ownsServer = false;
 }
 
 ipcMain.handle("widget:close", () => {
@@ -160,7 +172,7 @@ ipcMain.handle("widget:close", () => {
 });
 
 ipcMain.handle("widget:open-dashboard", () => {
-  shell.openExternal(`http://${HOST}:${PORT}/`);
+  shell.openExternal(`${currentServerEndpoint().baseUrl}/`);
 });
 
 ipcMain.handle("widget:quit", () => {
@@ -180,14 +192,14 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     try {
-      await ensureServer();
-      const health = await fetchHealth(HOST, PORT);
+      const endpoint = await ensureServer();
+      const health = await fetchHealth(endpoint.host, endpoint.port);
       if (!health?.ok) {
         throw new Error(`Server health check failed after ensureServer. See ${SERVER_LOG}`);
       }
       if (health.fixture && !ALLOW_FIXTURE) {
         throw new Error(
-          "Usage server is in FIXTURE mode but this widget was not started with --fixture. Refusing to show fake data. Stop the process on port 4321 and relaunch.",
+          `Usage server at ${endpoint.baseUrl} is in FIXTURE mode but this widget was not started with --fixture. Refusing to show fake data. Stop that server and relaunch.`,
         );
       }
     } catch (err) {

@@ -3,6 +3,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const Module = require("node:module");
 const path = require("node:path");
 const {
   resolveNodeBinary,
@@ -30,6 +31,100 @@ function createFakeFileSystem() {
     appendFileSync: () => {},
     readFileSync: () => "",
   };
+}
+
+async function loadMainHarness(serverResult) {
+  const mainPath = require.resolve("../desktop/main.cjs");
+  const app = new EventEmitter();
+  app.isQuitting = false;
+  app.requestSingleInstanceLock = () => true;
+  app.whenReady = () => Promise.resolve();
+  app.quit = () => {};
+
+  const ipcHandlers = new Map();
+  const windows = [];
+  const trays = [];
+  const openedUrls = [];
+  const healthCalls = [];
+
+  class FakeBrowserWindow extends EventEmitter {
+    constructor(options) {
+      super();
+      this.options = options;
+      this.loadedUrl = null;
+      windows.push(this);
+    }
+    setAlwaysOnTop() {}
+    setVisibleOnAllWorkspaces() {}
+    loadURL(url) {
+      this.loadedUrl = url;
+    }
+    showInactive() {}
+    show() {}
+    focus() {}
+    hide() {}
+    isVisible() {
+      return false;
+    }
+  }
+
+  class FakeTray extends EventEmitter {
+    constructor() {
+      super();
+      trays.push(this);
+    }
+    setToolTip() {}
+    setContextMenu(menu) {
+      this.menu = menu;
+    }
+  }
+
+  const electron = {
+    app,
+    BrowserWindow: FakeBrowserWindow,
+    Tray: FakeTray,
+    Menu: { buildFromTemplate: (template) => template },
+    nativeImage: { createFromDataURL: () => ({}) },
+    screen: {
+      getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    },
+    shell: {
+      openExternal: (url) => {
+        openedUrls.push(url);
+      },
+    },
+    ipcMain: {
+      handle: (channel, handler) => ipcHandlers.set(channel, handler),
+    },
+    dialog: { showErrorBox: () => {} },
+  };
+  const launchModule = {
+    DEFAULT_HOST: "127.0.0.1",
+    DEFAULT_PORT: 4321,
+    SERVER_LOG: "/tmp/server.log",
+    ensureUsageServer: async () => serverResult,
+    fetchHealth: async (host, port) => {
+      healthCalls.push({ host, port });
+      return { ok: true, fixture: false };
+    },
+  };
+
+  const originalLoad = Module._load;
+  Module._load = function load(request, parent, isMain) {
+    if (request === "electron") return electron;
+    if (parent?.filename === mainPath && request === "./server-launch.cjs") return launchModule;
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  delete require.cache[mainPath];
+  try {
+    require(mainPath);
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[mainPath];
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+
+  return { app, ipcHandlers, windows, trays, openedUrls, healthCalls };
 }
 
 test("resolveNodeBinary never returns electron.exe", () => {
@@ -234,6 +329,55 @@ test("ensureUsageServer preserves Windows mode-mismatch replacement on the prefe
     { host: "127.0.0.1", port: 4321 },
     { host: "127.0.0.1", port: 4321 },
   ]);
+});
+
+test("desktop main uses one returned endpoint and stops its owned child on quit", async () => {
+  const child = createFakeChild();
+  const harness = await loadMainHarness({
+    proc: child,
+    nodeBin: "/usr/bin/node",
+    logPath: "/tmp/server.log",
+    reused: false,
+    owned: true,
+    endpoint: {
+      host: "127.0.0.1",
+      port: 6543,
+      baseUrl: "http://127.0.0.1:6543",
+    },
+  });
+
+  assert.deepEqual(harness.healthCalls, [{ host: "127.0.0.1", port: 6543 }]);
+  assert.equal(harness.windows[0].loadedUrl, "http://127.0.0.1:6543/widget.html");
+
+  const dashboardItem = harness.trays[0].menu.find((item) => item.label === "Open full dashboard");
+  dashboardItem.click();
+  harness.ipcHandlers.get("widget:open-dashboard")();
+  assert.deepEqual(harness.openedUrls, [
+    "http://127.0.0.1:6543/",
+    "http://127.0.0.1:6543/",
+  ]);
+
+  harness.app.emit("before-quit");
+  assert.equal(child.killed, true);
+});
+
+test("desktop main never stops a child it does not own", async () => {
+  const child = createFakeChild();
+  const harness = await loadMainHarness({
+    proc: child,
+    nodeBin: "/usr/bin/node",
+    logPath: "/tmp/server.log",
+    reused: true,
+    owned: false,
+    endpoint: {
+      host: "127.0.0.1",
+      port: 4321,
+      baseUrl: "http://127.0.0.1:4321",
+    },
+  });
+
+  harness.app.emit("before-quit");
+  assert.equal(child.killed, false);
 });
 
 test("ensureUsageServer starts fixture server with real node (not electron)", async () => {
