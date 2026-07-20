@@ -6,6 +6,16 @@ Supports: **OpenAI Codex**, **OpenCode Go**, **Cursor**, **Claude**, **OpenRoute
 
 > Early public beta. Codex and Cursor are the most reliable paths today. Other adapters fail closed when credentials or upstream APIs are missing. See [Limitations](#limitations).
 
+## Demo
+
+Windows corner widget (always-on-top):
+
+![Corner widget showing Codex and Cursor usage](docs/widget-demo.png)
+
+Browser dashboard at `http://127.0.0.1:4321`:
+
+![Browser dashboard showing Codex and Cursor usage](docs/dashboard-demo.png)
+
 ## Features
 
 - Compact always-on-top **corner widget** (system tray, optional Windows startup)
