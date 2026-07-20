@@ -178,6 +178,36 @@ function assertNotElectronBinary(nodeBin) {
   }
 }
 
+function terminateChildAndWait(proc, timeoutMs = 3000) {
+  if (proc.exitCode !== null && proc.exitCode !== undefined) return Promise.resolve();
+  if (proc.signalCode !== null && proc.signalCode !== undefined) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      proc.removeListener("exit", onExit);
+      proc.removeListener("close", onExit);
+      if (err) reject(err);
+      else resolve();
+    };
+    const onExit = () => finish();
+    const timer = setTimeout(() => {
+      finish(new Error(`Child process did not exit within ${timeoutMs}ms after termination`));
+    }, timeoutMs);
+    proc.once("exit", onExit);
+    proc.once("close", onExit);
+
+    try {
+      proc.kill();
+    } catch (err) {
+      finish(err);
+    }
+  });
+}
+
 /**
  * @returns {Promise<{
  *   proc: import('node:child_process').ChildProcess | null,
@@ -294,10 +324,15 @@ async function ensureUsageServer(options = {}) {
       `Usage server did not become ready on ${endpoint.baseUrl} (node=${nodeBin}, exit=${exitCode}).\nLog: ${logPath}\n${tail}`,
     );
   } catch (err) {
-    try {
-      proc.kill();
-    } catch {
-      // ignore
+    if (exitCode === null) {
+      try {
+        await terminateChildAndWait(proc, options.terminationTimeoutMs ?? 3000);
+      } catch (cleanupErr) {
+        throw new Error(
+          `${err instanceof Error ? err.message : String(err)}\nFailed to terminate usage server child: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+          { cause: cleanupErr },
+        );
+      }
     }
     throw err;
   }

@@ -418,8 +418,16 @@ test("desktop main never stops a child it does not own", async () => {
   assert.equal(child.killed, false);
 });
 
-test("ensureUsageServer stops its spawned child when startup readiness fails", async () => {
+test("ensureUsageServer waits for its spawned child to exit when startup readiness fails", async () => {
   const child = createFakeChild();
+  let exited = false;
+  child.kill = () => {
+    child.killed = true;
+    setImmediate(() => {
+      exited = true;
+      child.emit("exit", 0);
+    });
+  };
   let healthChecks = 0;
 
   await assert.rejects(
@@ -443,6 +451,7 @@ test("ensureUsageServer stops its spawned child when startup readiness fails", a
 
   assert.equal(healthChecks, 2);
   assert.equal(child.killed, true);
+  assert.equal(exited, true);
 });
 
 test("ensureUsageServer starts fixture server with real node (not electron)", async () => {
