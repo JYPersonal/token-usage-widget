@@ -11,6 +11,11 @@ import {
   resolveCursorStateDbPath,
 } from "../src/adapters/cursor.js";
 import { __test as kimiTest } from "../src/adapters/kimi.js";
+import {
+  fetchOpenCodeUsage,
+  resolveAuthCookie,
+  resolveFirefoxProfilesRoot,
+} from "../src/adapters/opencode.js";
 import { __test as zaiTest } from "../src/adapters/zai.js";
 import { fetchOpenRouterUsage } from "../src/adapters/openrouter.js";
 import type { Config } from "../src/config.js";
@@ -118,6 +123,120 @@ test("Cursor path and token overrides stay ahead of platform defaults", async ()
     }),
     "override-token",
   );
+});
+
+test("OpenCode reads auth from a standard macOS Firefox profile", async (t) => {
+  const homeDir = await makeTempDir(t);
+  const profilesRoot = path.join(homeDir, "Library", "Application Support", "Firefox", "Profiles");
+  const cookieDb = path.join(profilesRoot, "fixture.default-release", "cookies.sqlite");
+  const tempDir = path.join(homeDir, "tmp");
+  await mkdir(path.dirname(cookieDb), { recursive: true });
+  await mkdir(tempDir, { recursive: true });
+  await writeFile(cookieDb, "fixture-opencode-cookie");
+
+  const sqlitePaths: string[] = [];
+  const cookie = await resolveAuthCookie(bareConfig(), {
+    platform: "darwin",
+    homeDir,
+    env: {},
+    tempDir,
+    sqliteGet: async (copiedDb) => {
+      sqlitePaths.push(copiedDb);
+      return readFile(copiedDb, "utf8");
+    },
+  });
+
+  assert.equal(cookie, "fixture-opencode-cookie");
+  assert.equal(sqlitePaths.length, 1);
+  assert.ok(sqlitePaths[0].startsWith(tempDir));
+});
+
+test("OpenCode explicit cookies stay ahead of Firefox discovery", async (t) => {
+  const homeDir = await makeTempDir(t);
+  const cookieFile = path.join(homeDir, "explicit-cookie.txt");
+  await writeFile(cookieFile, "cookie-from-file\n");
+  const noFirefox = async () => {
+    throw new Error("Firefox discovery should not run");
+  };
+
+  assert.equal(
+    await resolveAuthCookie(
+      bareConfig({
+        opencode: {
+          dbPath: "",
+          caps: { five_hour: null, week: null, month: null },
+          go: { workspaceId: null, authCookie: "cookie-from-config" },
+        },
+      }),
+      {
+        platform: "darwin",
+        homeDir,
+        env: { OPENCODE_GO_AUTH_COOKIE: "cookie-from-env" },
+        sqliteGet: noFirefox,
+      },
+    ),
+    "cookie-from-config",
+  );
+  assert.equal(
+    await resolveAuthCookie(bareConfig(), {
+      platform: "win32",
+      homeDir,
+      env: {
+        OPENCODE_GO_AUTH_COOKIE: "cookie-from-env",
+        OPENCODE_GO_AUTH_COOKIE_FILE: cookieFile,
+      },
+      sqliteGet: noFirefox,
+    }),
+    "cookie-from-env",
+  );
+  assert.equal(
+    await resolveAuthCookie(bareConfig(), {
+      platform: "darwin",
+      homeDir,
+      env: { OPENCODE_GO_AUTH_COOKIE_FILE: cookieFile },
+      sqliteGet: noFirefox,
+    }),
+    "cookie-from-file",
+  );
+});
+
+test("Firefox profile roots preserve Darwin and Win32 defaults", () => {
+  assert.equal(
+    resolveFirefoxProfilesRoot({ platform: "darwin", homeDir: "/Users/example" }),
+    path.join("/Users/example", "Library", "Application Support", "Firefox", "Profiles"),
+  );
+  assert.equal(
+    resolveFirefoxProfilesRoot({ platform: "win32", homeDir: "C:\\Users\\example" }),
+    path.join("C:\\Users\\example", "AppData", "Roaming", "Mozilla", "Firefox", "Profiles"),
+  );
+});
+
+test("OpenCode keeps unavailable honest and local estimates opt-in", async (t) => {
+  const homeDir = await makeTempDir(t);
+  const config = bareConfig({
+    opencode: {
+      dbPath: path.join(homeDir, "missing-opencode.db"),
+      caps: { five_hour: null, week: null, month: null },
+      go: { workspaceId: null, authCookie: null },
+    },
+  });
+
+  const unavailable = await fetchOpenCodeUsage(config, {
+    platform: "darwin",
+    homeDir,
+    env: {},
+  });
+  assert.equal(unavailable.windows.five_hour.status, "unavailable");
+  assert.match(unavailable.error ?? "", /Set workspace id and browser auth cookie/);
+  assert.doesNotMatch(unavailable.error ?? "", /local DB estimate/i);
+
+  const optedIn = await fetchOpenCodeUsage(config, {
+    platform: "darwin",
+    homeDir,
+    env: { OPENCODE_ALLOW_LOCAL_ESTIMATE: "1" },
+  });
+  assert.equal(optedIn.windows.five_hour.status, "unavailable");
+  assert.match(optedIn.error ?? "", /OpenCode database not found/);
 });
 
 test("claude mapOAuthUsage maps five_hour + seven_day", () => {
