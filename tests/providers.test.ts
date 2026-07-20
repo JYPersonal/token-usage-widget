@@ -13,6 +13,7 @@ import {
 import { __test as kimiTest } from "../src/adapters/kimi.js";
 import {
   fetchOpenCodeUsage,
+  readFirefoxAuthCookie,
   resolveAuthCookie,
   resolveFirefoxProfilesRoot,
 } from "../src/adapters/opencode.js";
@@ -149,6 +150,27 @@ test("OpenCode reads auth from a standard macOS Firefox profile", async (t) => {
   assert.equal(cookie, "fixture-opencode-cookie");
   assert.equal(sqlitePaths.length, 1);
   assert.ok(sqlitePaths[0].startsWith(tempDir));
+});
+
+test("OpenCode still reads Firefox cookies when the optional WAL cannot be copied", async () => {
+  const profilesRoot = path.join("fixture", "Profiles");
+  const dbPath = path.join(profilesRoot, "default-release", "cookies.sqlite");
+  const cookie = await readFirefoxAuthCookie({
+    profilesRoot,
+    tempDir: "fixture-temp",
+    firefoxFs: {
+      exists: (filePath) =>
+        filePath === profilesRoot || filePath === dbPath || filePath === `${dbPath}-wal`,
+      list: async () => ["default-release"],
+      copy: async (sourcePath) => {
+        if (sourcePath.endsWith("-wal")) throw new Error("Firefox WAL is locked");
+      },
+      remove: async () => {},
+    },
+    sqliteGet: async () => "cookie-without-wal-copy",
+  });
+
+  assert.equal(cookie, "cookie-without-wal-copy");
 });
 
 test("OpenCode explicit cookies stay ahead of Firefox discovery", async (t) => {

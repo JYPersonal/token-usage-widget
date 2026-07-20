@@ -286,7 +286,11 @@ export async function readFirefoxAuthCookie(
     try {
       await fs.copy(dbPath, tmp);
       if (fs.exists(`${dbPath}-wal`)) {
-        await fs.copy(`${dbPath}-wal`, `${tmp}-wal`);
+        try {
+          await fs.copy(`${dbPath}-wal`, `${tmp}-wal`);
+        } catch {
+          // WAL is optional; the copied main database may still contain the auth cookie.
+        }
       }
       const value = await (options.sqliteGet ?? sqliteScalar)(
         tmp,
