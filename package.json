@@ -21,7 +21,7 @@
     "widget": "electron .",
     "widget:bg": "scripts\\start-widget.cmd",
     "widget:startup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-widget.ps1 -InstallStartup",
-    "test": "node --import tsx --test tests/usage.test.ts tests/providers.test.ts tests/e2e-smoke.test.ts tests/server-launch.test.cjs tests/format-reset.test.cjs tests/widget-compact.test.cjs",
+    "test": "node --import tsx --test tests/usage.test.ts tests/providers.test.ts tests/e2e-smoke.test.ts tests/server-launch.test.cjs tests/format-reset.test.cjs tests/widget-compact.test.cjs tests/widget-bounds.test.cjs",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test && node scripts/e2e-evidence.mjs"
   },

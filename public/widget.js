@@ -12,6 +12,15 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function fitToContent() {
+  // Hug chrome + lines + footer; keep width (user-resized / persisted).
+  requestAnimationFrame(() => {
+    const root = document.documentElement;
+    const height = Math.ceil(Math.max(root.scrollHeight, root.getBoundingClientRect().height));
+    window.widgetBridge?.fitContent?.({ height });
+  });
+}
+
 function renderAll(data) {
   const lines = (data.providers || [])
     .map((p) => {
@@ -28,6 +37,7 @@ function renderAll(data) {
   const t = data.fetchedAt ? new Date(data.fetchedAt).toLocaleTimeString() : "";
   statusEl.textContent = t ? `↻ ${t}` : "";
   statusEl.classList.remove("error");
+  fitToContent();
 }
 
 async function loadUsage() {
@@ -43,12 +53,14 @@ async function refresh() {
     statusEl.textContent = `fail`;
     statusEl.classList.add("error");
     statusEl.title = String(err.message || err);
+    fitToContent();
     // Main process owns the Node usage server; ask it to revive, then retry once.
     try {
       const revived = await window.widgetBridge?.ensureServer?.();
       if (revived?.ok) await loadUsage();
     } catch (retryErr) {
       statusEl.title = String(retryErr.message || retryErr);
+      fitToContent();
     }
   }
 }

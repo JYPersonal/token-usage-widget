@@ -4,16 +4,26 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, screen, shell, ipcMain, dia
 const fs = require("node:fs");
 const path = require("node:path");
 const { fetchHealth, ensureUsageServer, DEFAULT_HOST, DEFAULT_PORT, SERVER_LOG } = require("./server-launch.cjs");
+const {
+  DEFAULT_WIDTH,
+  DEFAULT_HEIGHT,
+  loadBounds,
+  saveBounds,
+  cornerPlacement,
+  resizeBottomRight,
+} = require("./widget-bounds.cjs");
 
 const ROOT = path.join(__dirname, "..");
 const ICON_DIR = path.join(__dirname, "icons");
 const HOST = process.env.USAGE_HOST || DEFAULT_HOST;
 const PORT = Number(process.env.PORT || DEFAULT_PORT);
-const WIDGET_W = 320;
-const WIDGET_H = 172;
 const MARGIN = 16;
 /** Fixture is test-only. Widget product path never inherits USAGE_FIXTURE from the shell. */
 const ALLOW_FIXTURE = process.argv.includes("--fixture");
+/** Skip persisting while applying programmatic content-fit. */
+let applyingFit = false;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let persistTimer = null;
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -128,15 +138,51 @@ function startHealthWatchdog() {
   }, HEALTH_POLL_MS);
 }
 
+function userDataDir() {
+  return app.getPath("userData");
+}
+
 function cornerBounds() {
-  const display = screen.getPrimaryDisplay();
-  const area = display.workArea;
-  return {
-    x: Math.round(area.x + area.width - WIDGET_W - MARGIN),
-    y: Math.round(area.y + area.height - WIDGET_H - MARGIN),
-    width: WIDGET_W,
-    height: WIDGET_H,
-  };
+  const saved = loadBounds(userDataDir());
+  const size = saved || { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+  return cornerPlacement(size, screen.getPrimaryDisplay().workArea, MARGIN);
+}
+
+function persistWindowSize() {
+  if (!win || applyingFit || win.isDestroyed()) return;
+  const b = win.getBounds();
+  saveBounds(userDataDir(), { width: b.width, height: b.height });
+}
+
+function schedulePersistWindowSize() {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistWindowSize();
+  }, 250);
+}
+
+function fitWindowToContent(contentHeight) {
+  if (!win || win.isDestroyed()) return;
+  const h = Number(contentHeight);
+  if (!Number.isFinite(h) || h <= 0) return;
+  const b = win.getBounds();
+  const next = resizeBottomRight(b, b.width, Math.ceil(h));
+  if (next.width === b.width && next.height === b.height) {
+    // Still refresh persisted height so restarts match the tight layout.
+    saveBounds(userDataDir(), { width: next.width, height: next.height });
+    return;
+  }
+  applyingFit = true;
+  try {
+    win.setBounds(next);
+    saveBounds(userDataDir(), { width: next.width, height: next.height });
+  } finally {
+    // Defer so the resize event from setBounds does not race prefs.
+    setTimeout(() => {
+      applyingFit = false;
+    }, 0);
+  }
 }
 
 function iconPath(name) {
@@ -198,9 +244,15 @@ function createWindow() {
     win?.showInactive();
   });
 
+  win.on("resize", () => {
+    if (applyingFit) return;
+    schedulePersistWindowSize();
+  });
+
   win.on("close", (e) => {
     if (!app.isQuitting) {
       e.preventDefault();
+      persistWindowSize();
       win?.hide();
     }
   });
@@ -267,6 +319,7 @@ function stopServer() {
 }
 
 ipcMain.handle("widget:close", () => {
+  persistWindowSize();
   win?.hide();
 });
 
@@ -276,7 +329,13 @@ ipcMain.handle("widget:open-dashboard", () => {
 
 ipcMain.handle("widget:ensure-server", async () => reviveIfNeeded());
 
+ipcMain.handle("widget:fit-content", (_evt, payload) => {
+  const height = payload && typeof payload === "object" ? payload.height : payload;
+  fitWindowToContent(height);
+});
+
 ipcMain.handle("widget:quit", () => {
+  persistWindowSize();
   app.isQuitting = true;
   app.quit();
 });

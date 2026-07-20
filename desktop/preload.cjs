@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld("widgetBridge", {
   close: () => ipcRenderer.invoke("widget:close"),
   openDashboard: () => ipcRenderer.invoke("widget:open-dashboard"),
   ensureServer: () => ipcRenderer.invoke("widget:ensure-server"),
+  fitContent: (payload) => ipcRenderer.invoke("widget:fit-content", payload),
   quit: () => ipcRenderer.invoke("widget:quit"),
 });
