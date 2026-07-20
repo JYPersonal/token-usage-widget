@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { __test as claudeTest } from "../src/adapters/claude.js";
+import {
+  fetchCursorUsage,
+  readCursorAccessToken,
+  resolveCursorStateDbPath,
+} from "../src/adapters/cursor.js";
 import { __test as kimiTest } from "../src/adapters/kimi.js";
 import { __test as zaiTest } from "../src/adapters/zai.js";
 import { fetchOpenRouterUsage } from "../src/adapters/openrouter.js";
@@ -28,6 +36,89 @@ function bareConfig(overrides: Partial<Config> = {}): Config {
     ...overrides,
   };
 }
+
+async function makeTempDir(t: { after(fn: () => Promise<void>): void }): Promise<string> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "token-usage-providers-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+test("Cursor uses the standard macOS state database for normal usage", async (t) => {
+  const homeDir = await makeTempDir(t);
+  const dbPath = path.join(
+    homeDir,
+    "Library",
+    "Application Support",
+    "Cursor",
+    "User",
+    "globalStorage",
+    "state.vscdb",
+  );
+  await mkdir(path.dirname(dbPath), { recursive: true });
+  await writeFile(
+    dbPath,
+    JSON.stringify({
+      "cursorAuth/accessToken": "fixture-cursor-token",
+      "cursorAuth/stripeMembershipType": "pro",
+    }),
+  );
+
+  const sqlitePaths: string[] = [];
+  const usage = await fetchCursorUsage({
+    platform: "darwin",
+    homeDir,
+    env: {},
+    sqliteGet: async (fixturePath, sql) => {
+      sqlitePaths.push(fixturePath);
+      const fixture = JSON.parse(await readFile(fixturePath, "utf8")) as Record<string, string>;
+      const key = sql.includes("stripeMembershipType")
+        ? "cursorAuth/stripeMembershipType"
+        : "cursorAuth/accessToken";
+      return fixture[key] ?? "";
+    },
+    fetchImpl: async (_input, init) => {
+      assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer fixture-cursor-token");
+      return new Response(
+        JSON.stringify({
+          billingCycleEnd: "1780000000000",
+          planUsage: { totalPercentUsed: 37 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  assert.equal(usage.windows.month.status, "ok");
+  assert.equal(usage.windows.month.usedPercent, 37);
+  assert.equal(usage.billing?.planLabel, "Included in Pro");
+  assert.deepEqual(sqlitePaths, [dbPath, dbPath]);
+});
+
+test("Cursor path and token overrides stay ahead of platform defaults", async () => {
+  assert.equal(
+    resolveCursorStateDbPath({
+      platform: "darwin",
+      homeDir: "/Users/example",
+      env: { CURSOR_STATE_DB: "/override/cursor.sqlite" },
+    }),
+    "/override/cursor.sqlite",
+  );
+  assert.equal(
+    resolveCursorStateDbPath({ platform: "win32", homeDir: "C:\\Users\\example", env: {} }),
+    path.join("C:\\Users\\example", "AppData", "Roaming", "Cursor", "User", "globalStorage", "state.vscdb"),
+  );
+  assert.equal(
+    await readCursorAccessToken({
+      platform: "darwin",
+      homeDir: "/Users/example",
+      env: { CURSOR_TOKEN: "override-token" },
+      sqliteGet: async () => {
+        throw new Error("sqlite should not run for CURSOR_TOKEN");
+      },
+    }),
+    "override-token",
+  );
+});
 
 test("claude mapOAuthUsage maps five_hour + seven_day", () => {
   const windows = claudeTest.mapOAuthUsage({

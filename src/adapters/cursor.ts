@@ -147,17 +147,29 @@ export function buildCursorBilling(
   };
 }
 
-function stateDbPath(): string {
-  return (
-    process.env.CURSOR_STATE_DB?.trim() ||
-    path.join(
-      process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"),
-      "Cursor",
-      "User",
-      "globalStorage",
-      "state.vscdb",
-    )
-  );
+export interface CursorPathOptions {
+  platform?: NodeJS.Platform;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface CursorAdapterOptions extends CursorPathOptions {
+  sqliteGet?: (dbPath: string, sql: string) => Promise<string>;
+  fetchImpl?: typeof fetch;
+}
+
+export function resolveCursorStateDbPath(options: CursorPathOptions = {}): string {
+  const platform = options.platform ?? process.platform;
+  const homeDir = options.homeDir ?? os.homedir();
+  const env = options.env ?? process.env;
+  const override = env.CURSOR_STATE_DB?.trim();
+  if (override) return override;
+
+  const root =
+    platform === "darwin"
+      ? path.join(homeDir, "Library", "Application Support")
+      : env.APPDATA ?? path.join(homeDir, "AppData", "Roaming");
+  return path.join(root, "Cursor", "User", "globalStorage", "state.vscdb");
 }
 
 async function sqliteGet(dbPath: string, sql: string): Promise<string> {
@@ -177,12 +189,13 @@ async function sqliteGet(dbPath: string, sql: string): Promise<string> {
   }
 }
 
-export async function readCursorAccessToken(): Promise<string> {
-  const fromEnv = process.env.CURSOR_TOKEN?.trim();
+export async function readCursorAccessToken(options: CursorAdapterOptions = {}): Promise<string> {
+  const env = options.env ?? process.env;
+  const fromEnv = env.CURSOR_TOKEN?.trim();
   if (fromEnv) return fromEnv;
 
-  const stdout = await sqliteGet(
-    stateDbPath(),
+  const stdout = await (options.sqliteGet ?? sqliteGet)(
+    resolveCursorStateDbPath(options),
     "SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken';",
   );
   if (!stdout) {
@@ -191,10 +204,10 @@ export async function readCursorAccessToken(): Promise<string> {
   return stdout;
 }
 
-export async function readCursorMembership(): Promise<string | null> {
+export async function readCursorMembership(options: CursorAdapterOptions = {}): Promise<string | null> {
   try {
-    const value = await sqliteGet(
-      stateDbPath(),
+    const value = await (options.sqliteGet ?? sqliteGet)(
+      resolveCursorStateDbPath(options),
       "SELECT value FROM ItemTable WHERE key='cursorAuth/stripeMembershipType';",
     );
     return value || null;
@@ -203,8 +216,11 @@ export async function readCursorMembership(): Promise<string | null> {
   }
 }
 
-async function fetchCurrentPeriodUsage(token: string): Promise<CursorPeriodUsage> {
-  const res = await fetch(DASHBOARD_URL, {
+async function fetchCurrentPeriodUsage(
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CursorPeriodUsage> {
+  const res = await fetchImpl(DASHBOARD_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -221,11 +237,14 @@ async function fetchCurrentPeriodUsage(token: string): Promise<CursorPeriodUsage
   return (await res.json()) as CursorPeriodUsage;
 }
 
-export async function fetchCursorUsage(): Promise<ProviderUsage> {
+export async function fetchCursorUsage(options: CursorAdapterOptions = {}): Promise<ProviderUsage> {
   const fetchedAt = new Date().toISOString();
   try {
-    const [token, membership] = await Promise.all([readCursorAccessToken(), readCursorMembership()]);
-    const period = await fetchCurrentPeriodUsage(token);
+    const [token, membership] = await Promise.all([
+      readCursorAccessToken(options),
+      readCursorMembership(options),
+    ]);
+    const period = await fetchCurrentPeriodUsage(token, options.fetchImpl);
     return {
       provider: "cursor",
       label: "Cursor",
