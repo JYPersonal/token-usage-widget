@@ -33,6 +33,29 @@ test("assertNotElectronBinary throws for electron.exe", () => {
   assert.doesNotThrow(() => assertNotElectronBinary("C:\\\\nvm4w\\\\nodejs\\\\node.exe"));
 });
 
+test("ensureUsageServer reuses a matching healthy server and returns its endpoint", async () => {
+  const result = await ensureUsageServer({
+    platform: "darwin",
+    host: "127.0.0.1",
+    port: 5432,
+    env: { USAGE_FIXTURE: "1" },
+    fetchHealth: async () => ({ ok: true, fixture: true }),
+  });
+
+  assert.deepEqual(result, {
+    proc: null,
+    nodeBin: null,
+    logPath: result.logPath,
+    reused: true,
+    owned: false,
+    endpoint: {
+      host: "127.0.0.1",
+      port: 5432,
+      baseUrl: "http://127.0.0.1:5432",
+    },
+  });
+});
+
 test("ensureUsageServer starts fixture server with real node (not electron)", async () => {
   const port = 18765;
   // Clean slate: if something is on this port, skip conflict by using unique port.

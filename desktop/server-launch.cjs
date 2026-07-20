@@ -16,6 +16,16 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4321;
 const SERVER_LOG = path.join(os.tmpdir(), "token-usage-dashboard-server.log");
 
+function buildEndpoint(host, port) {
+  const normalizedHost = String(host);
+  const normalizedPort = Number(port);
+  return {
+    host: normalizedHost,
+    port: normalizedPort,
+    baseUrl: `http://${normalizedHost}:${normalizedPort}`,
+  };
+}
+
 function healthCheck(host = DEFAULT_HOST, port = DEFAULT_PORT, timeoutMs = 2000) {
   return fetchHealth(host, port, timeoutMs).then((h) => Boolean(h?.ok));
 }
@@ -125,13 +135,15 @@ async function ensureUsageServer(options = {}) {
   const envExtra = options.env || {};
   const logPath = options.logPath || SERVER_LOG;
   const maxAttempts = options.maxAttempts || 80;
+  const fetchHealthFn = options.fetchHealth || fetchHealth;
   const mergedEnv = { ...process.env, ...envExtra };
   const wantFixture =
     mergedEnv.USAGE_FIXTURE === "1" || String(mergedEnv.USAGE_FIXTURE).toLowerCase() === "true";
+  const endpoint = buildEndpoint(host, port);
 
-  const existing = await fetchHealth(host, port);
+  const existing = await fetchHealthFn(host, port);
   if (existing?.ok && existing.fixture === wantFixture) {
-    return { proc: null, nodeBin: null, logPath, reused: true };
+    return { proc: null, nodeBin: null, logPath, reused: true, owned: false, endpoint };
   }
   if (existing?.ok && existing.fixture !== wantFixture) {
     fs.appendFileSync(
@@ -176,9 +188,9 @@ async function ensureUsageServer(options = {}) {
 
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 250));
-    const h = await fetchHealth(host, port);
+    const h = await fetchHealthFn(host, port);
     if (h?.ok && h.fixture === wantFixture) {
-      return { proc, nodeBin, logPath, reused: false };
+      return { proc, nodeBin, logPath, reused: false, owned: true, endpoint };
     }
     if (exitCode !== null) break;
   }
@@ -199,6 +211,7 @@ module.exports = {
   DEFAULT_HOST,
   DEFAULT_PORT,
   SERVER_LOG,
+  buildEndpoint,
   healthCheck,
   fetchHealth,
   freePort,
