@@ -1,10 +1,12 @@
 "use strict";
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, screen, shell, ipcMain, dialog } = require("electron");
+const fs = require("node:fs");
 const path = require("node:path");
 const { fetchHealth, ensureUsageServer, DEFAULT_HOST, DEFAULT_PORT, SERVER_LOG } = require("./server-launch.cjs");
 
 const ROOT = path.join(__dirname, "..");
+const ICON_DIR = path.join(__dirname, "icons");
 const HOST = process.env.USAGE_HOST || DEFAULT_HOST;
 const PORT = Number(process.env.PORT || DEFAULT_PORT);
 const WIDGET_W = 320;
@@ -137,14 +139,36 @@ function cornerBounds() {
   };
 }
 
+function iconPath(name) {
+  return path.join(ICON_DIR, name);
+}
+
+function loadNativeIcon(name) {
+  const img = nativeImage.createFromPath(iconPath(name));
+  return img.isEmpty() ? null : img;
+}
+
+/** Tray wants a sharp small bitmap; fall back through sizes then hi-res. */
 function trayIcon() {
-  return nativeImage.createFromDataURL(
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAALElEQVQ4T2NkYGD4z0ABYBzVMKoBBgYGRvL8P6oBMjIy/xkZGBhHNWBUA0Y1AABeJQMR9ZyeRgAAAABJRU5ErkJggg==",
+  return (
+    loadNativeIcon("icon-16.png") ||
+    loadNativeIcon("icon-32.png") ||
+    loadNativeIcon("icon.png") ||
+    nativeImage.createEmpty()
   );
+}
+
+function windowIconPath() {
+  for (const name of ["icon.png", "icon-256.png", "icon-64.png", "icon-32.png"]) {
+    const p = iconPath(name);
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
 }
 
 function createWindow() {
   const bounds = cornerBounds();
+  const icon = windowIconPath();
   win = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -157,6 +181,7 @@ function createWindow() {
     fullscreenable: false,
     backgroundColor: "#04141c",
     show: false,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -267,6 +292,9 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    if (process.platform === "win32") {
+      app.setAppUserModelId("com.token-usage.widget");
+    }
     try {
       await ensureServer();
       const health = await fetchHealth(HOST, PORT);
