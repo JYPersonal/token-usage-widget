@@ -76,6 +76,60 @@ test("ensureUsageServer reuses a matching healthy server and returns its endpoin
   });
 });
 
+test("ensureUsageServer preserves an unknown Darwin listener and starts on a free port", async () => {
+  const child = new EventEmitter();
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+  };
+  const healthCalls = [];
+  let spawned;
+
+  const result = await ensureUsageServer({
+    platform: "darwin",
+    host: "127.0.0.1",
+    port: 4321,
+    env: { USAGE_FIXTURE: "1" },
+    maxAttempts: 1,
+    fetchHealth: async (host, port) => {
+      healthCalls.push({ host, port });
+      if (healthCalls.length === 1) return null;
+      return port === 6543 ? { ok: true, fixture: true } : null;
+    },
+    isPortAvailable: async () => false,
+    allocateFreeLoopbackPort: async () => 6543,
+    freePort: () => assert.fail("Darwin must not kill the preferred-port listener"),
+    resolveNodeBinary: () => "/usr/bin/node",
+    sleep: async () => {},
+    fs: {
+      existsSync: () => true,
+      writeFileSync: () => {},
+      openSync: () => 9,
+      closeSync: () => {},
+      appendFileSync: () => {},
+      readFileSync: () => "",
+    },
+    spawn: (nodeBin, args, options) => {
+      spawned = { nodeBin, args, options };
+      return child;
+    },
+  });
+
+  assert.equal(result.reused, false);
+  assert.equal(result.owned, true);
+  assert.equal(result.proc, child);
+  assert.deepEqual(result.endpoint, {
+    host: "127.0.0.1",
+    port: 6543,
+    baseUrl: "http://127.0.0.1:6543",
+  });
+  assert.equal(spawned.options.env.PORT, "6543");
+  assert.deepEqual(healthCalls, [
+    { host: "127.0.0.1", port: 4321 },
+    { host: "127.0.0.1", port: 6543 },
+  ]);
+});
+
 test("ensureUsageServer starts fixture server with real node (not electron)", async () => {
   const port = 18765;
   // Clean slate: if something is on this port, skip conflict by using unique port.

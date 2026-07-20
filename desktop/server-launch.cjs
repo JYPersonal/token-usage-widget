@@ -49,6 +49,25 @@ function allocateFreeLoopbackPort(host = DEFAULT_HOST, network = net) {
   });
 }
 
+function isLoopbackPortAvailable(host, port, network = net) {
+  return new Promise((resolve, reject) => {
+    const server = network.createServer();
+    const onError = (err) => {
+      if (err?.code === "EADDRINUSE") resolve(false);
+      else reject(err);
+    };
+    server.once("error", onError);
+    server.unref();
+    server.listen(port, host, () => {
+      server.removeListener("error", onError);
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve(true);
+      });
+    });
+  });
+}
+
 function healthCheck(host = DEFAULT_HOST, port = DEFAULT_PORT, timeoutMs = 2000) {
   return fetchHealth(host, port, timeoutMs).then((h) => Boolean(h?.ok));
 }
@@ -158,75 +177,107 @@ async function ensureUsageServer(options = {}) {
   const envExtra = options.env || {};
   const logPath = options.logPath || SERVER_LOG;
   const maxAttempts = options.maxAttempts || 80;
+  const platform = options.platform || process.platform;
+  const fileSystem = options.fs || fs;
   const fetchHealthFn = options.fetchHealth || fetchHealth;
+  const isPortAvailableFn = options.isPortAvailable || isLoopbackPortAvailable;
+  const allocateFreePortFn = options.allocateFreeLoopbackPort || allocateFreeLoopbackPort;
+  const freePortFn = options.freePort || freePort;
+  const resolveNodeBinaryFn = options.resolveNodeBinary || resolveNodeBinary;
+  const spawnFn = options.spawn || spawn;
+  const sleep = options.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const mergedEnv = { ...process.env, ...envExtra };
   const wantFixture =
     mergedEnv.USAGE_FIXTURE === "1" || String(mergedEnv.USAGE_FIXTURE).toLowerCase() === "true";
-  const endpoint = buildEndpoint(host, port);
 
   const existing = await fetchHealthFn(host, port);
   if (existing?.ok && existing.fixture === wantFixture) {
-    return { proc: null, nodeBin: null, logPath, reused: true, owned: false, endpoint };
+    return {
+      proc: null,
+      nodeBin: null,
+      logPath,
+      reused: true,
+      owned: false,
+      endpoint: buildEndpoint(host, port),
+    };
   }
-  if (existing?.ok && existing.fixture !== wantFixture) {
-    fs.appendFileSync(
+
+  let launchPort = port;
+  if (platform === "darwin") {
+    const preferredPortUnavailable = existing?.ok || !(await isPortAvailableFn(host, port));
+    if (preferredPortUnavailable) {
+      launchPort = await allocateFreePortFn(host);
+    }
+  } else if (existing?.ok && existing.fixture !== wantFixture) {
+    fileSystem.appendFileSync(
       logPath,
       `[${new Date().toISOString()}] port ${port} fixture=${existing.fixture} but want ${wantFixture}; freeing\n`,
     );
-    freePort(port);
-    await new Promise((r) => setTimeout(r, 500));
+    freePortFn(port);
+    await sleep(500);
   }
+  const endpoint = buildEndpoint(host, launchPort);
 
-  const nodeBin = resolveNodeBinary(mergedEnv);
+  const nodeBin = resolveNodeBinaryFn(mergedEnv);
   assertNotElectronBinary(nodeBin);
 
   const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
   const entry = path.join(root, "src", "server.ts");
-  if (!fs.existsSync(tsxCli)) {
+  if (!fileSystem.existsSync(tsxCli)) {
     throw new Error(`tsx CLI missing at ${tsxCli}. Run npm install in ${root}.`);
   }
 
-  fs.writeFileSync(logPath, `[${new Date().toISOString()}] starting server with ${nodeBin}\n`, "utf8");
-  const logFd = fs.openSync(logPath, "a");
-  const env = { ...mergedEnv, PORT: String(port) };
+  fileSystem.writeFileSync(logPath, `[${new Date().toISOString()}] starting server with ${nodeBin}\n`, "utf8");
+  const logFd = fileSystem.openSync(logPath, "a");
+  const env = { ...mergedEnv, PORT: String(launchPort) };
   delete env.ELECTRON_RUN_AS_NODE;
   // Default launch is live; only keep fixture when explicitly requested.
   if (!wantFixture) delete env.USAGE_FIXTURE;
 
-  const proc = spawn(nodeBin, [tsxCli, entry], {
-    cwd: root,
-    env,
-    stdio: ["ignore", logFd, logFd],
-    windowsHide: true,
-  });
-  fs.closeSync(logFd);
+  let proc;
+  try {
+    proc = spawnFn(nodeBin, [tsxCli, entry], {
+      cwd: root,
+      env,
+      stdio: ["ignore", logFd, logFd],
+      windowsHide: true,
+    });
+  } finally {
+    fileSystem.closeSync(logFd);
+  }
 
   let exitCode = null;
   proc.on("exit", (code) => {
     exitCode = code;
   });
   proc.on("error", (err) => {
-    fs.appendFileSync(logPath, `spawn error: ${err.message}\n`);
+    fileSystem.appendFileSync(logPath, `spawn error: ${err.message}\n`);
   });
 
-  for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, 250));
-    const h = await fetchHealthFn(host, port);
-    if (h?.ok && h.fixture === wantFixture) {
-      return { proc, nodeBin, logPath, reused: false, owned: true, endpoint };
-    }
-    if (exitCode !== null) break;
-  }
-
-  const tail = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").slice(-800) : "(no log)";
   try {
-    proc.kill();
-  } catch {
-    // ignore
+    for (let i = 0; i < maxAttempts; i++) {
+      await sleep(250);
+      const h = await fetchHealthFn(host, launchPort);
+      if (h?.ok && h.fixture === wantFixture) {
+        return { proc, nodeBin, logPath, reused: false, owned: true, endpoint };
+      }
+      if (exitCode !== null) break;
+    }
+
+    const tail = fileSystem.existsSync(logPath)
+      ? fileSystem.readFileSync(logPath, "utf8").slice(-800)
+      : "(no log)";
+    throw new Error(
+      `Usage server did not become ready on ${endpoint.baseUrl} (node=${nodeBin}, exit=${exitCode}).\nLog: ${logPath}\n${tail}`,
+    );
+  } catch (err) {
+    try {
+      proc.kill();
+    } catch {
+      // ignore
+    }
+    throw err;
   }
-  throw new Error(
-    `Usage server did not become ready on http://${host}:${port} (node=${nodeBin}, exit=${exitCode}).\nLog: ${logPath}\n${tail}`,
-  );
 }
 
 module.exports = {
