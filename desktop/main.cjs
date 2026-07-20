@@ -163,6 +163,17 @@ function runWidgetMain({
     });
   }
 
+  function installApplicationMenu() {
+    if (platform !== "darwin") return;
+    const applicationMenu = Menu.buildFromTemplate([
+      {
+        label: app.name || "Token Usage",
+        submenu: [{ role: "quit", accelerator: "Command+Q" }],
+      },
+    ]);
+    Menu.setApplicationMenu(applicationMenu);
+  }
+
   function buildTray() {
     tray = new Tray(trayIcon());
     tray.setToolTip("Token Usage");
@@ -239,6 +250,7 @@ function runWidgetMain({
     if (policy.hideDock && app.dock) {
       app.dock.hide();
     }
+    installApplicationMenu();
 
     for (const eventName of ["display-added", "display-removed", "display-metrics-changed"]) {
       screen.on(eventName, reanchorWindow);

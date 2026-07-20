@@ -71,6 +71,7 @@ async function loadMainHarness(
   const healthCalls = [];
   const legacyIcons = [];
   const templateIcons = [];
+  const applicationMenus = [];
   let cursorPoint = { x: 2500, y: 400 };
   let activePointerDisplay = pointerDisplay;
 
@@ -142,7 +143,18 @@ async function loadMainHarness(
     app,
     BrowserWindow: FakeBrowserWindow,
     Tray: FakeTray,
-    Menu: { buildFromTemplate: (template) => template },
+    Menu: {
+      buildFromTemplate: (template) =>
+        template.map((item) => ({
+          ...item,
+          submenu: item.submenu?.map((submenuItem) =>
+            submenuItem.role === "quit" && !submenuItem.click
+              ? { ...submenuItem, click: () => app.quit() }
+              : submenuItem,
+          ),
+        })),
+      setApplicationMenu: (menu) => applicationMenus.push(menu),
+    },
     nativeImage: {
       createFromDataURL: (dataUrl) => {
         const image = { dataUrl, template: false };
@@ -213,6 +225,7 @@ async function loadMainHarness(
     healthCalls,
     legacyIcons,
     templateIcons,
+    applicationMenus,
     screen: screenApi,
     setCursorPoint: (point) => {
       cursorPoint = point;
@@ -653,6 +666,35 @@ test("Darwin main applies menu-bar utility policy and reanchors every restore pa
   }
 });
 
+test("Darwin application menu routes Command-Q through native quit cleanup once", async () => {
+  const child = createFakeChild();
+  const harness = await loadMainHarness(
+    {
+      proc: child,
+      nodeBin: "/usr/bin/node",
+      logPath: "/tmp/server.log",
+      reused: false,
+      owned: true,
+      endpoint: {
+        host: "127.0.0.1",
+        port: 6543,
+        baseUrl: "http://127.0.0.1:6543",
+      },
+    },
+    { platform: "darwin" },
+  );
+
+  assert.equal(harness.applicationMenus.length, 1);
+  const appMenu = harness.applicationMenus[0][0];
+  const commandQItem = appMenu.submenu.find((item) => item.role === "quit");
+  assert.equal(commandQItem.accelerator, "Command+Q");
+  commandQItem.click();
+  harness.app.emit("before-quit");
+
+  assert.equal(harness.app.quitCalls, 1);
+  assert.equal(child.killCalls, 1);
+});
+
 test("Darwin hide remains restorable while every exit route cleans up once", async () => {
   function ownedServerResult(child) {
     return {
@@ -741,6 +783,7 @@ test("Win32 main preserves tray, primary placement, Spaces, and native close-to-
 
   assert.deepEqual(harness.app.activationPolicies, []);
   assert.equal(harness.app.dock.hideCalls, 0);
+  assert.equal(harness.applicationMenus.length, 0);
   assert.deepEqual(
     { x: window.options.x, y: window.options.y, width: window.options.width, height: window.options.height },
     { x: 1584, y: 892, width: 320, height: 172 },
