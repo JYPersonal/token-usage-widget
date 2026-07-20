@@ -7,8 +7,6 @@ const {
   selectDisplay,
 } = require("./platform-policy.cjs");
 const {
-  DEFAULT_WIDTH,
-  DEFAULT_HEIGHT,
   loadBounds,
   saveBounds,
   cornerPlacement,
@@ -69,7 +67,11 @@ function runWidgetMain({
   }
 
   function userDataDir() {
-    return app.getPath("userData");
+    try {
+      return typeof app.getPath === "function" ? app.getPath("userData") : null;
+    } catch {
+      return null;
+    }
   }
 
   function bindOwnedServer(proc) {
@@ -122,6 +124,8 @@ function runWidgetMain({
       reviveTimer = null;
       void reviveIfNeeded();
     }, delayMs);
+    // Keep product revive alive without pinning the Node test runner open.
+    reviveTimer.unref?.();
   }
 
   /**
@@ -165,19 +169,26 @@ function runWidgetMain({
     healthTimer = setInterval(() => {
       void reviveIfNeeded();
     }, HEALTH_POLL_MS);
+    healthTimer.unref?.();
   }
 
   function cornerBounds() {
-    const saved = loadBounds(userDataDir());
-    const size = saved || { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+    const dir = userDataDir();
+    const saved = dir ? loadBounds(dir) : null;
+    // Prefer persisted size; otherwise keep platform-policy geometry (320x172).
+    const size = saved || { width: policy.width, height: policy.height };
     const display = selectDisplay(policy, screen);
     return cornerPlacement(size, display.workArea, policy.margin);
   }
 
   function persistWindowSize() {
-    if (!win || applyingFit || win.isDestroyed()) return;
+    if (!win || applyingFit) return;
+    if (typeof win.isDestroyed === "function" && win.isDestroyed()) return;
+    if (typeof win.getBounds !== "function") return;
+    const dir = userDataDir();
+    if (!dir) return;
     const b = win.getBounds();
-    saveBounds(userDataDir(), { width: b.width, height: b.height });
+    saveBounds(dir, { width: b.width, height: b.height });
   }
 
   function schedulePersistWindowSize() {
@@ -186,26 +197,31 @@ function runWidgetMain({
       persistTimer = null;
       persistWindowSize();
     }, 250);
+    persistTimer.unref?.();
   }
 
   function fitWindowToContent(contentHeight) {
-    if (!win || win.isDestroyed()) return;
+    if (!win) return;
+    if (typeof win.isDestroyed === "function" && win.isDestroyed()) return;
+    if (typeof win.getBounds !== "function") return;
     const h = Number(contentHeight);
     if (!Number.isFinite(h) || h <= 0) return;
+    const dir = userDataDir();
     const b = win.getBounds();
     const next = resizeBottomRight(b, b.width, Math.ceil(h));
     if (next.width === b.width && next.height === b.height) {
-      saveBounds(userDataDir(), { width: next.width, height: next.height });
+      if (dir) saveBounds(dir, { width: next.width, height: next.height });
       return;
     }
     applyingFit = true;
     try {
       win.setBounds(next);
-      saveBounds(userDataDir(), { width: next.width, height: next.height });
+      if (dir) saveBounds(dir, { width: next.width, height: next.height });
     } finally {
-      setTimeout(() => {
+      const release = setTimeout(() => {
         applyingFit = false;
       }, 0);
+      release.unref?.();
     }
   }
 
@@ -214,6 +230,7 @@ function runWidgetMain({
   }
 
   function loadNativeIcon(name) {
+    if (typeof nativeImage.createFromPath !== "function") return null;
     const img = nativeImage.createFromPath(iconPath(name));
     return img.isEmpty() ? null : img;
   }
@@ -252,9 +269,7 @@ function runWidgetMain({
 
   function reanchorWindow() {
     if (!win) return;
-    const size = { width: win.getBounds().width, height: win.getBounds().height };
-    const display = selectDisplay(policy, screen);
-    win.setBounds(cornerPlacement(size, display.workArea, policy.margin));
+    win.setBounds(cornerBounds());
   }
 
   function showWindow({ focus = false, inactive = false } = {}) {
@@ -274,7 +289,8 @@ function runWidgetMain({
   }
 
   function createWindow() {
-    const icon = windowIconPath();
+    // Windows taskbar/window chrome uses the PNG set; Darwin menu-bar utility does not.
+    const icon = platform === "win32" ? windowIconPath() : undefined;
     win = new BrowserWindow({
       ...cornerBounds(),
       frame: false,
@@ -430,7 +446,7 @@ function runWidgetMain({
   });
 
   app.whenReady().then(async () => {
-    if (platform === "win32") {
+    if (platform === "win32" && typeof app.setAppUserModelId === "function") {
       app.setAppUserModelId("com.token-usage.widget");
     }
     if (policy.activationPolicy && typeof app.setActivationPolicy === "function") {
