@@ -274,10 +274,19 @@ async function ensureUsageServer(options = {}) {
   });
   assertNotElectronBinary(nodeBin);
 
+  const distEntry = path.join(root, "dist", "server.js");
   const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
-  const entry = path.join(root, "src", "server.ts");
-  if (!fileSystem.existsSync(tsxCli)) {
-    throw new Error(`tsx CLI missing at ${tsxCli}. Run npm install in ${root}.`);
+  const srcEntry = path.join(root, "src", "server.ts");
+
+  let spawnArgs;
+  if (fileSystem.existsSync(distEntry)) {
+    spawnArgs = [distEntry];
+  } else if (fileSystem.existsSync(tsxCli) && fileSystem.existsSync(srcEntry)) {
+    spawnArgs = [tsxCli, srcEntry];
+  } else {
+    throw new Error(
+      `Usage server entry missing. Expected ${distEntry} (run npm run build) or tsx + ${srcEntry} (run npm install).`,
+    );
   }
 
   fileSystem.writeFileSync(logPath, `[${new Date().toISOString()}] starting server with ${nodeBin}\n`, "utf8");
@@ -289,7 +298,7 @@ async function ensureUsageServer(options = {}) {
 
   let proc;
   try {
-    proc = spawnFn(nodeBin, [tsxCli, entry], {
+    proc = spawnFn(nodeBin, spawnArgs, {
       cwd: root,
       env,
       stdio: ["ignore", logFd, logFd],

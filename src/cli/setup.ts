@@ -14,6 +14,8 @@ import {
   DEFAULT_ENABLED,
   SETUP_DEFAULTS_ENABLED,
   configPath,
+  ensureConfigDir,
+  migrateCwdConfigIfNeeded,
   type Config,
   type ProviderFlags,
 } from "../config.js";
@@ -116,6 +118,7 @@ const SECRET_BY_PROVIDER: Partial<Record<ProviderId, SecretSpec>> = {
 };
 
 function loadExisting(): Record<string, unknown> {
+  migrateCwdConfigIfNeeded();
   const p = configPath();
   if (!existsSync(p)) return {};
   try {
@@ -177,6 +180,7 @@ function applySecret(
 }
 
 function writeConfig(merged: Record<string, unknown>): void {
+  ensureConfigDir();
   const p = configPath();
   writeFileSync(p, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
   // eslint-disable-next-line no-console

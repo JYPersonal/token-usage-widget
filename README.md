@@ -20,7 +20,7 @@ If you bounce between **Codex**, **Cursor**, and other harnesses, usage is scatt
 - **Full dashboard** — `http://127.0.0.1:4321`
 - **Only enabled providers** — you choose what to poll; the rest stay off
 
-Secrets stay in gitignored `config.json`. Default bind is localhost.
+Secrets stay in a per-user `config.json` (not in the install tree). Default bind is localhost.
 
 ## Demo
 
@@ -41,23 +41,42 @@ A macOS screenshot is **not** available for this release — the maintainer has 
 ## Quick start (≈2 minutes)
 
 ```bash
-git clone https://github.com/JYPersonal/token-usage-widget.git
-cd token-usage-widget
-npm install
-npm run setup:defaults   # OpenAI Codex + Cursor (local login)
-npm run widget:bg        # corner widget (Windows or macOS)
+npm i -g token-usage-widget   # first install downloads Electron (~100–150MB)
+tuw setup --defaults          # OpenAI Codex + Cursor (local login)
+tuw                           # corner widget (Windows or macOS)
 ```
 
-Or open the full UI:
+Or open the full browser dashboard:
 
 ```bash
-npm start
+tuw start
 # → http://127.0.0.1:4321
 ```
 
-**Requirements:** Node.js 18+ (CI uses 22). Windows or macOS 13+ (Intel or Apple Silicon) for the Electron widget. `sqlite3` on `PATH` helps Cursor (and some OpenCode fallbacks). Distribution is source-checkout only — no packaged app, DMG, signing, or notarization.
+| Command | What it does |
+| ------- | ------------ |
+| `tuw` / `tuw widget` | Start the corner widget |
+| `tuw setup` | Interactive provider setup |
+| `tuw setup --defaults` | Enable OpenAI + Cursor only |
+| `tuw start` | Dashboard server only |
+| `tuw startup install` | Enable login Startup (platform-specific) |
 
-Already logged into Codex CLI and Cursor desktop? `setup:defaults` is usually enough.
+**Requirements:** Node.js 18+ (CI uses 22). Windows or macOS 13+ (Intel or Apple Silicon) for the Electron widget. `sqlite3` on `PATH` helps Cursor (and some OpenCode fallbacks). No DMG/EXE signing or notarization — distribution is the npm package + Electron runtime.
+
+Config lives under `%APPDATA%/token-usage-widget/config.json` (Windows) or `~/.config/token-usage-widget/config.json` (macOS/Linux). Override with `TOKEN_USAGE_WIDGET_CONFIG`. A one-time migrate copies a checkout `./config.json` into that location when missing.
+
+Already logged into Codex CLI and Cursor desktop? `tuw setup --defaults` is usually enough.
+
+### From source (contributors)
+
+```bash
+git clone https://github.com/JYPersonal/token-usage-widget.git
+cd token-usage-widget
+npm install
+npm run build
+npm run setup:defaults
+npm run widget:bg
+```
 
 ## Who it’s for
 
@@ -94,11 +113,11 @@ Already logged into Codex CLI and Cursor desktop? `setup:defaults` is usually en
 
 | Command                  | What it does                                     |
 | ------------------------ | ------------------------------------------------ |
-| `npm run setup`          | Interactive: enable providers + optional secrets |
-| `npm run setup:defaults` | Enable **OpenAI + Cursor** only                  |
+| `tuw setup` / `npm run setup` | Interactive: enable providers + optional secrets |
+| `tuw setup --defaults` / `npm run setup:defaults` | Enable **OpenAI + Cursor** only                  |
 | `npm run setup:all`      | Enable all provider flags (no secret prompts)    |
 
-Or copy [`config.example.json`](./config.example.json) → `config.json`.
+Or copy [`config.example.json`](./config.example.json) into your user config path (see Quick start).
 
 Env vars override file secrets when set (`OPENROUTER_API_KEY`, `CLAUDE_ACCESS_TOKEN`, `OPENCODE_GO_AUTH_COOKIE`, …).
 

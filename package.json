@@ -1,5 +1,5 @@
 {
-  "name": "token-usage-dashboard",
+  "name": "token-usage-widget",
   "version": "1.0.0",
   "description": "Local Windows corner widget + dashboard for Codex, Cursor, and other AI harness quotas. MIT, localhost-only.",
   "repository": {
@@ -12,7 +12,27 @@
   "homepage": "https://github.com/JYPersonal/token-usage-widget#readme",
   "type": "module",
   "main": "desktop/main.cjs",
+  "bin": {
+    "tuw": "bin/tuw.cjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "desktop/",
+    "public/",
+    "scripts/start-widget.cjs",
+    "scripts/start-widget.cmd",
+    "scripts/start-widget.ps1",
+    "config.example.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "setup": "tsx src/cli/setup.ts",
@@ -23,9 +43,9 @@
     "widget:startup": "node --import tsx src/cli/startup.ts install",
     "widget:startup:disable": "node --import tsx src/cli/startup.ts remove",
     "widget:status": "node --import tsx src/cli/startup.ts status",
-    "test": "node --import tsx --test tests/usage.test.ts tests/providers.test.ts tests/e2e-smoke.test.ts tests/server-launch.test.cjs tests/start-widget.test.cjs tests/format-reset.test.cjs tests/widget-compact.test.cjs tests/widget-bounds.test.cjs tests/login-launch.test.ts tests/setup.test.ts tests/ci-workflow.test.cjs",
+    "test": "node --import tsx --test tests/usage.test.ts tests/providers.test.ts tests/e2e-smoke.test.ts tests/server-launch.test.cjs tests/start-widget.test.cjs tests/format-reset.test.cjs tests/widget-compact.test.cjs tests/widget-bounds.test.cjs tests/login-launch.test.ts tests/setup.test.ts tests/ci-workflow.test.cjs tests/config-paths.test.ts",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm test && node scripts/e2e-evidence.mjs"
+    "verify": "npm run typecheck && npm run build && npm test && node scripts/e2e-evidence.mjs"
   },
   "keywords": [
     "tokens",
@@ -39,16 +59,17 @@
     "openrouter",
     "kimi",
     "zai",
-    "grok"
+    "grok",
+    "tuw"
   ],
-  "author": "",
+  "author": "ycm_jy",
   "license": "MIT",
   "dependencies": {
-    "codex-status-mcp": "^0.4.3"
+    "codex-status-mcp": "^0.4.3",
+    "electron": "^35.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.19",
-    "electron": "^35.2.1",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }

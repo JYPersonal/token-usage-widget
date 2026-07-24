@@ -1,9 +1,48 @@
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 import type { ProviderId, WindowId } from "./types.js";
 import { ALL_PROVIDER_IDS } from "./types.js";
+
+const PACKAGE_NAME = "token-usage-widget";
+
+/** Package install root (parent of `src/` or `dist/`). */
+export function packageRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+/** Stable per-user config directory (not cwd). */
+export function userDataDir(): string {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA?.trim();
+    const base = appData && appData.length > 0
+      ? appData
+      : path.join(os.homedir(), "AppData", "Roaming");
+    return path.join(base, PACKAGE_NAME);
+  }
+  return path.join(os.homedir(), ".config", PACKAGE_NAME);
+}
+
+/**
+ * One-time copy of checkout `./config.json` into user-data when missing.
+ * No-ops when TOKEN_USAGE_WIDGET_CONFIG is set or destination already exists.
+ */
+export function migrateCwdConfigIfNeeded(): void {
+  if (process.env.TOKEN_USAGE_WIDGET_CONFIG?.trim()) return;
+  const dest = path.join(userDataDir(), "config.json");
+  if (existsSync(dest)) return;
+  const cwdConfig = path.join(process.cwd(), "config.json");
+  if (!existsSync(cwdConfig)) return;
+  if (path.resolve(cwdConfig) === path.resolve(dest)) return;
+  mkdirSync(userDataDir(), { recursive: true });
+  copyFileSync(cwdConfig, dest);
+}
+
+export function ensureConfigDir(): void {
+  mkdirSync(path.dirname(configPath()), { recursive: true });
+}
 
 export interface OpenCodeCaps {
   five_hour: number | null;
@@ -113,14 +152,17 @@ function strOrNull(v: unknown): string | null {
 }
 
 export function configPath(): string {
-  return path.join(process.cwd(), "config.json");
+  const override = process.env.TOKEN_USAGE_WIDGET_CONFIG?.trim();
+  if (override) return path.resolve(override);
+  return path.join(userDataDir(), "config.json");
 }
 
 export function exampleConfigPath(): string {
-  return path.join(process.cwd(), "config.example.json");
+  return path.join(packageRoot(), "config.example.json");
 }
 
 export async function loadConfig(): Promise<Config> {
+  migrateCwdConfigIfNeeded();
   const cfg = defaultConfig();
   const envDb = process.env.OPENCODE_DB_PATH;
   if (envDb && envDb.trim() !== "") cfg.opencode.dbPath = envDb;
