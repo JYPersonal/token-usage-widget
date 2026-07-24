@@ -487,6 +487,9 @@ function runWidgetMain({
 
 module.exports = { runWidgetMain };
 
-if (require.main === module) {
+// Electron 35+ does not set require.main for the app entry (require.main === module
+// is false), so gating on that alone leaves a headless Electron process with no
+// window/tray. Tests require this module (module.parent set) and call runWidgetMain.
+if (require.main === module || (process.versions.electron && !module.parent)) {
   runWidgetMain();
 }
